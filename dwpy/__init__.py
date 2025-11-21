@@ -21,7 +21,7 @@ from .dw_auto import (
 )
 
 # PSF generation
-from .psf import generate_psf_bw
+from .psf import generate_psf_bw, generate_psf_gl
 
 # Optional backends
 try:
@@ -47,6 +47,7 @@ __all__ = [
     "estimate_memory_usage",
     # PSF
     "generate_psf_bw",
+    "generate_psf_gl",
     # Optional
     "dask_deconvolve",
     "deconvolve_jax",

@@ -1,10 +1,17 @@
 import numpy as np
 import scipy.special
 
+# Import local Gibson-Lanni implementation
+try:
+    from .microscope_psf import MicroscopePSF as MicroscopePSFLocal
+except ImportError:
+    MicroscopePSFLocal = None
+
+# Also try to import from pxtools for backwards compatibility
 try:
     from pxtools.pipeline.deconvolution.microscope_psf import MicroscopePSF
 except ImportError:  # pragma: no cover - optional dependency
-    MicroscopePSF = None
+    MicroscopePSF = MicroscopePSFLocal
 
 # models of PSFs
 def nikon25x105na(xy_size=17, z_size=17, dxy=0.173, dz=0.5, na_number=1.05, wvl=0.561, tl=300.0):
@@ -193,6 +200,171 @@ def generate_psf_bw(
         pixel_samples=pixel_samples,
     )
     return generator.generate(dxy=dxy, dz=dz, xy_size=xy_size, z_size=z_size)
+
+
+def generate_psf_gl(
+    dxy: float,
+    dz: float,
+    xy_size: int,
+    z_size: int,
+    NA: float = 1.4,
+    ni: float = 1.515,
+    wvl: float = 0.6,
+    M: float = 60.0,
+    ns: float = 1.33,
+    ti0: float = 150.0,
+    ni0: float | None = None,
+    tg: float = 170.0,
+    tg0: float | None = None,
+    ng: float = 1.515,
+    ng0: float | None = None,
+    zd0: float = 200e3,
+    num_basis: int = 100,
+    rho_samples: int = 1000,
+) -> np.ndarray:
+    """
+    Generate a Gibson-Lanni PSF using fast Fourier-Bessel series method.
+
+    The Gibson-Lanni model accounts for optical aberrations due to refractive
+    index mismatch between the immersion medium, coverslip, and specimen. This
+    makes it more accurate than Born-Wolf when imaging into aqueous specimens
+    with oil immersion objectives.
+
+    Parameters
+    ----------
+    dxy : float
+        Lateral voxel size in microns (e.g., 0.065 for 65nm pixels)
+    dz : float
+        Axial voxel size in microns (e.g., 0.2 for 200nm steps)
+    xy_size : int
+        Lateral kernel size in pixels (should be odd, e.g., 25)
+    z_size : int
+        Axial kernel size in pixels (should be odd, e.g., 25)
+    NA : float, optional
+        Numerical aperture (default: 1.4)
+    ni : float, optional
+        Immersion medium refractive index, actual value (default: 1.515 for oil)
+    wvl : float, optional
+        Emission wavelength in microns (default: 0.6)
+    M : float, optional
+        Objective magnification (default: 60.0)
+    ns : float, optional
+        Specimen refractive index (default: 1.33 for water)
+    ti0 : float, optional
+        Working distance design value in microns (default: 150)
+    ni0 : float | None, optional
+        Immersion medium RI design value. If None, uses ni (perfect system)
+    tg : float, optional
+        Coverslip thickness actual in microns (default: 170)
+    tg0 : float | None, optional
+        Coverslip thickness design in microns. If None, uses tg
+    ng : float, optional
+        Coverslip RI actual (default: 1.515)
+    ng0 : float | None, optional
+        Coverslip RI design. If None, uses ng
+    zd0 : float, optional
+        Tube length in microns (default: 200000 for 200mm)
+    num_basis : int, optional
+        Number of Bessel basis functions for series expansion (default: 100)
+    rho_samples : int, optional
+        Number of samples in pupil coordinates (default: 1000)
+
+    Returns
+    -------
+    np.ndarray
+        PSF array of shape (xy_size, xy_size, z_size), dtype float32,
+        normalized such that psf.sum() == 1.0
+
+    Examples
+    --------
+    >>> # Generate PSF for 60x/1.4NA oil immersion into aqueous specimen
+    >>> psf = generate_psf_gl(
+    ...     dxy=0.065, dz=0.2,
+    ...     xy_size=25, z_size=25,
+    ...     NA=1.4, ni=1.515, ns=1.33, wvl=0.52
+    ... )
+    >>> psf.shape
+    (25, 25, 25)
+    >>> psf.sum()  # doctest: +SKIP
+    1.0
+
+    Notes
+    -----
+    The Gibson-Lanni model includes optical path differences from three layers:
+    - Specimen (refractive index ns)
+    - Immersion medium (refractive index ni)
+    - Coverslip (refractive index ng)
+
+    When specimen RI matches immersion RI (ns ≈ ni), results should be similar
+    to Born-Wolf model. The main advantage is accounting for RI mismatch, which
+    is common when imaging cells (n ≈ 1.38) or aqueous solutions (n ≈ 1.33)
+    with oil immersion (n = 1.515).
+
+    References
+    ----------
+    Gibson, S. F., & Lanni, F. (1992). Experimental test of an analytical model
+    of aberration in an oil-immersion objective lens used in three-dimensional
+    light microscopy. JOSA A, 9(1), 154-166.
+
+    Li, J., Xue, F., & Blu, T. (2017). Fast and accurate three-dimensional point
+    spread function computation for fluorescence microscopy. JOSA A, 34(6), 1029-1034.
+    """
+    # Use local implementation if available, otherwise None
+    if MicroscopePSFLocal is None:
+        raise ImportError(
+            "Gibson-Lanni PSF generation requires the microscope_psf module. "
+            "This should be included in dwpy but appears to be missing."
+        )
+
+    # Set default design values to match actual values (perfect system)
+    if ni0 is None:
+        ni0 = ni
+    if tg0 is None:
+        tg0 = tg
+    if ng0 is None:
+        ng0 = ng
+
+    # Create PSF generator
+    psf_gen = MicroscopePSFLocal()
+    psf_gen.num_basis = num_basis
+    psf_gen.rho_samples = rho_samples
+
+    # Set microscope parameters
+    psf_gen.parameters["M"] = M
+    psf_gen.parameters["NA"] = NA
+    psf_gen.parameters["ni0"] = ni0
+    psf_gen.parameters["ni"] = ni
+    psf_gen.parameters["ng0"] = ng0
+    psf_gen.parameters["ng"] = ng
+    psf_gen.parameters["ns"] = ns
+    psf_gen.parameters["ti0"] = ti0
+    psf_gen.parameters["tg0"] = tg0
+    psf_gen.parameters["tg"] = tg
+    psf_gen.parameters["zd0"] = zd0
+
+    # Generate z positions for particle scan
+    lz = z_size * dz
+    z_offset = -(lz - 2 * dz) / 2
+    pz = np.arange(0, lz, dz)
+
+    # Generate PSF (returns ZYX order)
+    psf_zyx = psf_gen.gLXYZParticleScan(
+        dxy=dxy,
+        xy_size=xy_size,
+        pz=pz,
+        zv=z_offset,
+        wvl=wvl,
+        normalize=True
+    )
+
+    # Transpose from ZYX to XYZ to match generate_psf_bw format
+    psf_xyz = np.transpose(psf_zyx, (1, 2, 0))
+
+    # Ensure normalization
+    psf_xyz = psf_xyz / psf_xyz.sum()
+
+    # Convert to float32
+    return psf_xyz.astype(np.float32)
 
 
 def generate_psf_custom(dxy, dz, xy_size, z_size, M=25, NA=1.05, n=1.33, wd=550, tl=300.0 * 1.0e3, wvl=0.561, ni=1.405):

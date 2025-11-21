@@ -154,19 +154,54 @@ result = deconvolve_tiled(im, psf, method='shb', cfg=cfg)
 
 ## PSF Generation
 
+dwpy provides two PSF models: **Born-Wolf** (simpler, faster) and **Gibson-Lanni** (more accurate with RI mismatch).
+
+### Born-Wolf PSF (Recommended for most cases)
+
 ```python
-from dwpy.psf import generate_psf_bw
+import dwpy
 
 # Generate Born-Wolf PSF
-psf = generate_psf_bw(
-    shape=(64, 64, 64),    # PSF dimensions
-    dxy=0.065,             # Pixel size (μm)
-    dz=0.2,                # Z-step (μm)
-    wavelength=0.520,      # Emission wavelength (μm)
-    na=1.4,                # Numerical aperture
-    ni=1.518,              # Immersion medium refractive index
+psf = dwpy.generate_psf_bw(
+    dxy=0.065,             # Lateral pixel size (μm)
+    dz=0.2,                # Axial pixel size (μm)
+    xy_size=64,            # Lateral size (pixels, should be odd)
+    z_size=64,             # Axial size (pixels, should be odd)
+    NA=1.4,                # Numerical aperture
+    ni=1.518,              # Immersion medium RI
+    wvl=0.520,             # Emission wavelength (μm)
 )
 ```
+
+### Gibson-Lanni PSF (For RI mismatch scenarios)
+
+Use when imaging aqueous specimens (cells, water) with oil immersion objectives:
+
+```python
+import dwpy
+
+# Generate Gibson-Lanni PSF
+# 60x/1.4NA oil immersion imaging into aqueous specimen
+psf = dwpy.generate_psf_gl(
+    dxy=0.065,             # Lateral pixel size (μm)
+    dz=0.2,                # Axial pixel size (μm)
+    xy_size=64,            # Lateral size (pixels)
+    z_size=64,             # Axial size (pixels)
+    NA=1.4,                # Numerical aperture
+    ni=1.515,              # Immersion RI (oil)
+    ns=1.33,               # Specimen RI (water/cells)
+    wvl=0.520,             # Emission wavelength (μm)
+    M=60,                  # Magnification
+    ti0=150,               # Working distance (μm)
+    # Optional: coverslip parameters
+    tg=170,                # Coverslip thickness (μm)
+    ng=1.515,              # Coverslip RI
+)
+```
+
+**When to use which:**
+- **Born-Wolf**: Simpler, faster, good for matched RI (e.g., oil immersion into oil-matched sample)
+- **Gibson-Lanni**: More accurate when specimen RI ≠ immersion RI (e.g., oil into water/cells), accounts for coverslip and working distance effects
 
 ## Examples
 
