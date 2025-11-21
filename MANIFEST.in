@@ -1,0 +1,4 @@
+include README_DWPY.md
+include LICENSE
+include pyproject.toml
+recursive-include dwpy *.py py.typed

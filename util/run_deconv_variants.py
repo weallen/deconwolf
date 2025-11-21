@@ -28,7 +28,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 # Local imports
-from python import dw_numpy
+from dwpy import dw_numpy
 
 
 def load_demo():
@@ -76,7 +76,7 @@ def run_jax(im: np.ndarray, psf: np.ndarray, method: str, demo_dir: Path, n_iter
         print(f"[skip] JAX not available: {exc}")
         return
 
-    from python import dw_jax
+    from dwpy import dw_jax
 
     psf_j = jnp.array(psf, dtype=jnp.float32)
     im_j = jnp.array(im, dtype=jnp.float32)

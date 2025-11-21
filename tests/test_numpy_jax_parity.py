@@ -12,7 +12,7 @@ import pytest
 jax = pytest.importorskip("jax")
 import jax.numpy as jnp  # noqa: E402
 
-from python import dw_fast, dw_jax, dw_numpy  # noqa: E402
+from dwpy import dw_fast, dw_jax, dw_numpy  # noqa: E402
 
 
 def _corr(a: np.ndarray, b: np.ndarray) -> float:

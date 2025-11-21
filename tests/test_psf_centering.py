@@ -1,7 +1,7 @@
 import numpy as np
 
-from python import dw_numpy
-from python import dw_fast
+from dwpy import dw_numpy
+from dwpy import dw_fast
 
 
 def test_center_psf_padded_matches_c_shift_numpy():

@@ -1,8 +1,10 @@
 """
-Focused benchmark on synthetic dataset with ground truth.
-Tests NumPy and JAX with:
+Comprehensive benchmark on synthetic dataset with ground truth.
+Tests all available backends (NumPy, JAX, CuPy, Numba, FFTW) with:
   - C-matching parameters (50 iterations)
   - Auto-tuned parameters (50 iterations)
+
+Outputs quality metrics (PSNR, NRMSE) and performance comparisons.
 """
 import sys
 from pathlib import Path
@@ -16,8 +18,8 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from python.dw_numpy import DeconvolutionConfig, deconvolve as deconvolve_numpy
-from python.dw_fast import deconvolve_fast
+from dwpy.dw_numpy import DeconvolutionConfig, deconvolve as deconvolve_numpy
+from dwpy.dw_fast import deconvolve_fast
 
 
 def center_psf_for_c(psf):
@@ -74,7 +76,7 @@ def log_numpy_iterations():
     Temporarily wrap dw_numpy.iter_shb_step to print per-iteration stats
     (error plus input/output ranges) for debugging numerical issues.
     """
-    import python.dw_numpy as dw_numpy
+    import dwpy.dw_numpy as dw_numpy
 
     orig_iter = dw_numpy.iter_shb_step
     counter = {"i": 0}
@@ -248,6 +250,7 @@ def main():
 
     # Test 2: JAX with C-matching params
     try:
+        import jax
         t2, r2, m2 = run_test(
             "JAX (SHB, C-matching params)",
             lambda im, psf, cfg: deconvolve_fast(im, psf, method="shb", backend="jax", cfg=cfg),
@@ -259,14 +262,62 @@ def main():
         out_zyx = np.transpose(r2, (2, 1, 0))
         tf.imwrite(output_dir / "jax_c_match_50iter.tif", out_zyx)
     except ImportError:
-        print("JAX not available")
+        print("\n⚠ JAX not available, skipping JAX test")
+
+    # Test 3: CuPy with C-matching params
+    try:
+        import cupy
+        t3, r3, m3 = run_test(
+            "CuPy (SHB, C-matching params)",
+            lambda im, psf, cfg: deconvolve_fast(im, psf, method="shb", backend="cupy", cfg=cfg),
+            im_xyz, psf_xyz, cfg_c_match, ground_truth
+        )
+        results["CuPy (C-match)"] = {"time": t3, "metrics": m3}
+
+        # Save output
+        out_zyx = np.transpose(r3, (2, 1, 0))
+        tf.imwrite(output_dir / "cupy_c_match_50iter.tif", out_zyx)
+    except ImportError:
+        print("\n⚠ CuPy not available, skipping CuPy test")
+
+    # Test 4: Numba with C-matching params
+    try:
+        import numba
+        t4, r4, m4 = run_test(
+            "Numba (SHB, C-matching params)",
+            lambda im, psf, cfg: deconvolve_fast(im, psf, method="shb", backend="numba", cfg=cfg),
+            im_xyz, psf_xyz, cfg_c_match, ground_truth
+        )
+        results["Numba (C-match)"] = {"time": t4, "metrics": m4}
+
+        # Save output
+        out_zyx = np.transpose(r4, (2, 1, 0))
+        tf.imwrite(output_dir / "numba_c_match_50iter.tif", out_zyx)
+    except ImportError:
+        print("\n⚠ Numba not available, skipping Numba test")
+
+    # Test 5: FFTW with C-matching params
+    try:
+        import pyfftw
+        t5, r5, m5 = run_test(
+            "FFTW (SHB, C-matching params)",
+            lambda im, psf, cfg: deconvolve_fast(im, psf, method="shb", backend="fftw", cfg=cfg),
+            im_xyz, psf_xyz, cfg_c_match, ground_truth
+        )
+        results["FFTW (C-match)"] = {"time": t5, "metrics": m5}
+
+        # Save output
+        out_zyx = np.transpose(r5, (2, 1, 0))
+        tf.imwrite(output_dir / "fftw_c_match_50iter.tif", out_zyx)
+    except ImportError:
+        print("\n⚠ PyFFTW not available, skipping FFTW test")
 
     # Configuration 2: Auto-tuned parameters
     print("\n" + "="*70)
     print("CONFIGURATION 2: Auto-Tuned Parameters")
     print("="*70)
 
-    from python.dw_auto import auto_config
+    from dwpy.dw_auto import auto_config
 
     cfg_auto = auto_config(im_xyz, psf_xyz, quality="high")
     cfg_auto.n_iter = 50  # Override to match test
@@ -275,33 +326,82 @@ def main():
     print(f"            offset={cfg_auto.offset:.2f}, pad_fast_fft={cfg_auto.pad_fast_fft}")
     print(f"            tile_max_size={cfg_auto.tile_max_size}")
 
-    # Test 3: NumPy with auto params
-    t3, r3, m3 = run_test(
+    # Test 6: NumPy with auto params
+    t6, r6, m6 = run_test(
         "NumPy (SHB, auto-tuned)",
         lambda im, psf, cfg: deconvolve_numpy(im, psf, method="shb", cfg=cfg),
         im_xyz, psf_xyz, cfg_auto, ground_truth,
         log_iterations=True,
     )
-    results["NumPy (auto)"] = {"time": t3, "metrics": m3}
+    results["NumPy (auto)"] = {"time": t6, "metrics": m6}
 
     # Save output
-    out_zyx = np.transpose(r3, (2, 1, 0))
+    out_zyx = np.transpose(r6, (2, 1, 0))
     tf.imwrite(output_dir / "numpy_auto_50iter.tif", out_zyx)
 
-    # Test 4: JAX with auto params
+    # Test 7: JAX with auto params
     try:
-        t4, r4, m4 = run_test(
+        import jax
+        t7, r7, m7 = run_test(
             "JAX (SHB, auto-tuned)",
             lambda im, psf, cfg: deconvolve_fast(im, psf, method="shb", backend="jax", cfg=cfg),
             im_xyz, psf_xyz, cfg_auto, ground_truth
         )
-        results["JAX (auto)"] = {"time": t4, "metrics": m4}
+        results["JAX (auto)"] = {"time": t7, "metrics": m7}
 
         # Save output
-        out_zyx = np.transpose(r4, (2, 1, 0))
+        out_zyx = np.transpose(r7, (2, 1, 0))
         tf.imwrite(output_dir / "jax_auto_50iter.tif", out_zyx)
     except ImportError:
-        pass
+        print("\n⚠ JAX not available for auto-tuned test")
+
+    # Test 8: CuPy with auto params
+    try:
+        import cupy
+        t8, r8, m8 = run_test(
+            "CuPy (SHB, auto-tuned)",
+            lambda im, psf, cfg: deconvolve_fast(im, psf, method="shb", backend="cupy", cfg=cfg),
+            im_xyz, psf_xyz, cfg_auto, ground_truth
+        )
+        results["CuPy (auto)"] = {"time": t8, "metrics": m8}
+
+        # Save output
+        out_zyx = np.transpose(r8, (2, 1, 0))
+        tf.imwrite(output_dir / "cupy_auto_50iter.tif", out_zyx)
+    except ImportError:
+        print("\n⚠ CuPy not available for auto-tuned test")
+
+    # Test 9: Numba with auto params
+    try:
+        import numba
+        t9, r9, m9 = run_test(
+            "Numba (SHB, auto-tuned)",
+            lambda im, psf, cfg: deconvolve_fast(im, psf, method="shb", backend="numba", cfg=cfg),
+            im_xyz, psf_xyz, cfg_auto, ground_truth
+        )
+        results["Numba (auto)"] = {"time": t9, "metrics": m9}
+
+        # Save output
+        out_zyx = np.transpose(r9, (2, 1, 0))
+        tf.imwrite(output_dir / "numba_auto_50iter.tif", out_zyx)
+    except ImportError:
+        print("\n⚠ Numba not available for auto-tuned test")
+
+    # Test 10: FFTW with auto params
+    try:
+        import pyfftw
+        t10, r10, m10 = run_test(
+            "FFTW (SHB, auto-tuned)",
+            lambda im, psf, cfg: deconvolve_fast(im, psf, method="shb", backend="fftw", cfg=cfg),
+            im_xyz, psf_xyz, cfg_auto, ground_truth
+        )
+        results["FFTW (auto)"] = {"time": t10, "metrics": m10}
+
+        # Save output
+        out_zyx = np.transpose(r10, (2, 1, 0))
+        tf.imwrite(output_dir / "fftw_auto_50iter.tif", out_zyx)
+    except ImportError:
+        print("\n⚠ PyFFTW not available for auto-tuned test")
 
     # Summary tables
     print("\n" + "="*70)

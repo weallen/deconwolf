@@ -44,9 +44,9 @@ def _import_module(path: Path, module_name: str):
     spec.loader.exec_module(mod)  # type: ignore
     return mod
 
-PYTHON_DIR = ROOT / "python"
-dw_fast = _import_module(PYTHON_DIR / "dw_fast.py", "python.dw_fast")
-dw_numpy = _import_module(PYTHON_DIR / "dw_numpy.py", "python.dw_numpy")
+PYTHON_DIR = ROOT / "dwpy"
+dw_fast = _import_module(PYTHON_DIR / "dw_fast.py", "dwpy.dw_fast")
+dw_numpy = _import_module(PYTHON_DIR / "dw_numpy.py", "dwpy.dw_numpy")
 
 
 def load_demo():

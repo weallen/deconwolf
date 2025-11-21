@@ -12,8 +12,8 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from python.dw_numpy import DeconvolutionConfig, deconvolve as deconvolve_numpy
-from python.dw_fast import deconvolve_fast
+from dwpy.dw_numpy import DeconvolutionConfig, deconvolve as deconvolve_numpy
+from dwpy.dw_fast import deconvolve_fast
 
 
 def benchmark_backend(name, backend_func, im, psf, cfg, n_runs=3):

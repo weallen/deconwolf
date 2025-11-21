@@ -1,6 +1,6 @@
 import numpy as np
 
-from python import generate_psf_bw
+from dwpy import generate_psf_bw
 
 
 def _make_psf(**kwargs):

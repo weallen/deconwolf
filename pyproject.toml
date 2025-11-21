@@ -1,0 +1,73 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dwpy"
+version = "0.1.0"
+description = "Python deconvolution backends for DeconWolf"
+readme = "README_DWPY.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "DeconWolf Contributors"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+
+dependencies = [
+    "numpy>=1.20.0",
+    "scipy>=1.7.0",
+]
+
+[project.optional-dependencies]
+# Optional backends for faster performance
+jax = ["jax>=0.4.0", "jaxlib>=0.4.0"]
+cupy = ["cupy>=10.0.0"]
+numba = ["numba>=0.56.0"]
+fftw = ["pyfftw>=0.12.0"]
+dask = ["dask[array]>=2022.0.0"]
+
+# Auto-config with memory detection
+auto = ["psutil>=5.8.0"]
+
+# Development and testing
+dev = [
+    "pytest>=7.0.0",
+    "tifffile>=2021.0.0",
+    "psutil>=5.8.0",
+]
+
+# All optional features
+all = [
+    "jax>=0.4.0",
+    "jaxlib>=0.4.0",
+    "cupy>=10.0.0",
+    "numba>=0.56.0",
+    "pyfftw>=0.12.0",
+    "dask[array]>=2022.0.0",
+    "psutil>=5.8.0",
+    "tifffile>=2021.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/elgw/deconwolf"
+Repository = "https://github.com/elgw/deconwolf"
+Issues = "https://github.com/elgw/deconwolf/issues"
+
+[tool.setuptools.packages.find]
+include = ["dwpy*"]
+exclude = ["python*", "demo*", "tests*", "util*"]
+
+[tool.setuptools.package-data]
+dwpy = ["py.typed"]
