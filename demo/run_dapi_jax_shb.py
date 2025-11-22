@@ -109,8 +109,8 @@ def main():
     wvl = 0.466  # DAPI emission peak (466nm, blue)
     M_mag = 60
 
-    # Generate physically-sized PSFs (memory efficient)
-    print(f"\nGenerating physically-sized PSFs (match_image_size=False)...")
+    # Generate PSFs matching image dimensions
+    print(f"\nGenerating PSFs to match image size...")
 
     # 1. Gibson-Lanni PSF
     print("\n1. Gibson-Lanni PSF (oil→cells)")
@@ -119,7 +119,7 @@ def main():
         dxy=dxy, dz=dz,
         NA=NA, ni=1.515, ns=1.38, wvl=wvl, M=M_mag,
         ti0=150.0, tg=170.0, ng=1.515,
-        match_image_size=False  # Physically-sized (efficient)
+        match_image_size=True  # Match image dimensions
     )
     print(f"   Generated: {psf_gl.shape}, sum={psf_gl.sum():.6f}")
     tf.imwrite(output_dir / "PSF_GL.tif", np.transpose(psf_gl, (2, 1, 0)))
@@ -130,7 +130,7 @@ def main():
         im_xyz,
         dxy=dxy, dz=dz,
         NA=NA, ni=1.515, wvl=wvl,
-        match_image_size=False  # Physically-sized (efficient)
+        match_image_size=True  # Match image dimensions
     )
     print(f"   Generated: {psf_bw.shape}, sum={psf_bw.sum():.6f}")
     tf.imwrite(output_dir / "PSF_BW.tif", np.transpose(psf_bw, (2, 1, 0)))
