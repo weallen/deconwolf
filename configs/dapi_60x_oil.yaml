@@ -1,0 +1,42 @@
+# DAPI Imaging with 60x/1.45NA Oil Immersion
+# Based on demo/makefile PSF_dapi.tif parameters
+
+name: "DAPI 60x Oil Immersion"
+
+microscope:
+  objective: "60x/1.45NA Oil"
+  NA: 1.45
+  ni: 1.512  # Oil immersion
+  ns: 1.38   # Cellular specimen
+  M: 60.0
+  ti0: 150.0  # Working distance (μm)
+  tg: 170.0   # Coverslip thickness (μm)
+  ng: 1.512   # Coverslip RI (same as immersion)
+
+imaging:
+  dxy: 0.130  # μm (130nm lateral pixel size)
+  dz: 0.300   # μm (300nm axial pixel size)
+  wavelength: 0.461  # μm (461nm, DAPI emission peak)
+
+psf:
+  model: "gibson-lanni"  # Use GL for RI mismatch (oil→cells)
+  xy_size: null  # Auto-calculate (default: 181)
+  z_size: null   # Auto-calculate using C heuristic
+  # Design parameters (null = match actual)
+  ni0: null  # Design immersion RI
+  tg0: null  # Design coverslip thickness
+  ng0: null  # Design coverslip RI
+
+deconvolution:
+  method: "shb"
+  backend: "jax"
+  n_iter: 20  # Match original demo script
+  border_quality: 2
+  positivity: true
+  metric: "idiv"
+  use_weights: true
+  offset: 5.0  # DAPI has background offset
+  pad_fast_fft: true
+  alphamax: 1.0
+  tile_max_size: null  # null = no tiling
+  tile_overlap: 50

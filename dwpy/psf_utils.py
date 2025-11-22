@@ -5,6 +5,99 @@ import numpy as np
 from typing import Tuple, Optional
 
 
+def auto_psf_size_c_heuristic(
+    dxy: float,
+    dz: float,
+    NA: float,
+    wvl: float,
+    ni: float,
+    xy_size: Optional[int] = None,
+    z_size: Optional[int] = None,
+) -> Tuple[int, int]:
+    """
+    Calculate PSF size using deconwolf C code heuristic.
+
+    Matches the sizing logic from dw_bwpsf.c for consistency with the
+    C implementation.
+
+    Parameters
+    ----------
+    dxy : float
+        Lateral pixel size in microns
+    dz : float
+        Axial pixel size in microns
+    NA : float
+        Numerical aperture
+    wvl : float
+        Wavelength in microns
+    ni : float
+        Immersion medium refractive index
+    xy_size : int, optional
+        Manual override for lateral size. If None, uses C default (181)
+    z_size : int, optional
+        Manual override for axial size. If None, auto-calculates using C formula
+
+    Returns
+    -------
+    xy_size : int
+        Lateral PSF size in pixels (odd number)
+    z_size : int
+        Axial PSF size in pixels (odd number)
+
+    Notes
+    -----
+    The C code formula for axial size (from dw_bwpsf.c lines 424-433):
+        nslice = floor(181.0 * 300.0 / resAxial / 2.0)
+        P = nslice * 2 + 3
+
+    Where:
+    - 181 pixels = reference lateral PSF size
+    - 300 nm = reference axial pixel size
+    - 54,300 nm total = assumed imaging depth
+    - Formula scales based on actual axial resolution
+
+    Examples
+    --------
+    >>> # DAPI imaging: 130nm lateral, 300nm axial
+    >>> xy, z = auto_psf_size_c_heuristic(
+    ...     dxy=0.130, dz=0.300, NA=1.45, wvl=0.461, ni=1.512
+    ... )
+    >>> print(f"PSF size: {xy}x{xy}x{z}")
+    PSF size: 181x181x183
+
+    >>> # Higher resolution: 65nm lateral, 200nm axial
+    >>> xy, z = auto_psf_size_c_heuristic(
+    ...     dxy=0.065, dz=0.200, NA=1.4, wvl=0.52, ni=1.515
+    ... )
+    >>> print(f"PSF size: {xy}x{xy}x{z}")
+    PSF size: 181x181x273
+    """
+    # Lateral size: C code default or manual override
+    if xy_size is None:
+        xy_size = 181  # C code default from dw_psf.c and dw_bwpsf.c
+
+    # Axial size: C code auto-calculation formula or manual override
+    if z_size is None:
+        # Convert dz to nm for formula
+        resAxial_nm = dz * 1000.0
+
+        # C code formula: nslice = floor(181.0 * 300.0 / resAxial / 2.0)
+        nslice = int(np.floor(181.0 * 300.0 / resAxial_nm / 2.0))
+        z_size = nslice * 2 + 3  # Guarantees odd number
+
+    # Ensure odd sizes (for Fourier symmetry)
+    if xy_size % 2 == 0:
+        xy_size += 1
+    if z_size % 2 == 0:
+        z_size += 1
+
+    # Minimum size constraints
+    xy_size = max(xy_size, 11)
+    z_size = max(z_size, 11)
+
+    return xy_size, z_size
+
+
 def pad_psf_to_image_size(
     psf: np.ndarray,
     image_shape: Tuple[int, int, int],
@@ -429,6 +522,7 @@ For each tile with padding:
 
 
 __all__ = [
+    'auto_psf_size_c_heuristic',
     'calculate_psf_size',
     'pad_psf_to_image_size',
     'auto_generate_psf_bw',

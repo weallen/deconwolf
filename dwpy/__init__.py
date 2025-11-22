@@ -23,12 +23,24 @@ from .dw_auto import (
 # PSF generation
 from .psf import generate_psf_bw, generate_psf_gl
 from .psf_utils import (
+    auto_psf_size_c_heuristic,
     calculate_psf_size,
     pad_psf_to_image_size,
     auto_generate_psf_bw,
     auto_generate_psf_gl,
     explain_tiled_deconvolution,
 )
+
+# Configuration system
+from .config_schema import (
+    MicroscopeConfig,
+    ImagingConfig,
+    PSFConfig,
+    DeconvolutionConfigParams,
+    ExperimentConfig,
+)
+from .config_loader import load_experiment_config, save_experiment_config
+from .workflow import generate_psf_from_config, deconvolve_from_config
 
 # Optional backends
 try:
@@ -56,11 +68,22 @@ __all__ = [
     "generate_psf_bw",
     "generate_psf_gl",
     # PSF utilities
+    "auto_psf_size_c_heuristic",
     "calculate_psf_size",
     "pad_psf_to_image_size",
     "auto_generate_psf_bw",
     "auto_generate_psf_gl",
     "explain_tiled_deconvolution",
+    # Configuration system
+    "MicroscopeConfig",
+    "ImagingConfig",
+    "PSFConfig",
+    "DeconvolutionConfigParams",
+    "ExperimentConfig",
+    "load_experiment_config",
+    "save_experiment_config",
+    "generate_psf_from_config",
+    "deconvolve_from_config",
     # Optional
     "dask_deconvolve",
     "deconvolve_jax",

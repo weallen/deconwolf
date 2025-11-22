@@ -1,0 +1,34 @@
+# GFP Imaging with 60x/1.4NA Oil Immersion
+
+name: "GFP 60x Oil Immersion"
+
+microscope:
+  objective: "60x/1.4NA Oil"
+  NA: 1.4
+  ni: 1.515  # Oil immersion
+  ns: 1.38   # Cellular specimen
+  M: 60.0
+  ti0: 150.0
+  tg: 170.0
+  ng: 1.515
+
+imaging:
+  dxy: 0.065  # μm (65nm lateral pixel size)
+  dz: 0.200   # μm (200nm axial pixel size)
+  wavelength: 0.509  # μm (509nm, GFP emission peak)
+
+psf:
+  model: "gibson-lanni"  # RI mismatch (oil→cells)
+  xy_size: null  # Auto: 181
+  z_size: null   # Auto from C heuristic
+
+deconvolution:
+  method: "shb"
+  backend: "jax"
+  n_iter: 30
+  border_quality: 2
+  positivity: true
+  metric: "idiv"
+  use_weights: true
+  offset: 0.0
+  pad_fast_fft: true

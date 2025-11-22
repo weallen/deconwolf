@@ -1,0 +1,35 @@
+# Synthetic Dataset with 100x/1.4NA Oil Immersion
+
+name: "Synthetic 100x Oil Immersion"
+
+microscope:
+  objective: "100x/1.4NA Oil"
+  NA: 1.4
+  ni: 1.515  # Oil immersion
+  ns: 1.38   # Cellular specimen
+  M: 100.0
+  ti0: 150.0  # Working distance (μm)
+  tg: 170.0   # Coverslip thickness (μm)
+  ng: 1.515   # Coverslip RI
+
+imaging:
+  dxy: 0.100  # μm (100nm lateral pixel size)
+  dz: 0.200   # μm (200nm axial pixel size)
+  wavelength: 0.520  # μm (520nm, green)
+
+psf:
+  model: "gibson-lanni"  # Use GL for RI mismatch
+  xy_size: null  # Auto-calculate
+  z_size: null   # Auto-calculate using C heuristic
+
+deconvolution:
+  method: "shb"
+  backend: "jax"
+  n_iter: 50
+  border_quality: 2
+  positivity: true
+  metric: "idiv"
+  use_weights: true
+  offset: 0.0  # Synthetic data has no offset
+  pad_fast_fft: true
+  alphamax: 1.0

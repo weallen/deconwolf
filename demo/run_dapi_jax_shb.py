@@ -92,65 +92,65 @@ def main():
         psf_supplied = psf_supplied / psf_supplied.sum()
         print(f"  Supplied PSF: {psf_supplied.shape} (XYZ)")
 
-    # DAPI imaging parameters - FROM MAKEFILE
-    # makefile uses: --resxy 130 --resz 300 --lambda 461 --NA 1.45 --ni 1.512
-    dxy = 0.130  # 130nm lateral pixels (from makefile)
-    dz = 0.300   # 300nm z-steps (from makefile)
-
-    print(f"  Voxel size: {dxy}×{dxy}×{dz} μm (from makefile)")
-
-    # Generate PSFs
+    # Load experiment configuration from YAML
     print("\n" + "=" * 70)
-    print("GENERATING PSFs")
+    print("LOADING CONFIGURATION")
     print("=" * 70)
 
-    # Common PSF parameters for DAPI - FROM MAKEFILE
-    NA = 1.45      # From makefile
-    ni = 1.512     # From makefile (immersion RI)
-    wvl = 0.461    # From makefile (461nm, DAPI emission)
-    M_mag = 60
+    config_path = ROOT / "configs" / "dapi_60x_oil.yaml"
+    config = dwpy.load_experiment_config(config_path)
 
-    # Generate PSFs with size matching supplied PSF (181×181×79)
-    # Note: This is LARGER than the image (101×201×40) which is correct!
-    print(f"\nGenerating PSFs (181×181×79 to match supplied PSF size)...")
+    print(f"✓ Config: {config.name}")
+    print(f"  Microscope: {config.microscope.objective}")
+    print(f"  Voxel size: {config.imaging.dxy*1000:.0f}nm/{config.imaging.dz*1000:.0f}nm")
+    print(f"  Wavelength: {config.imaging.wavelength*1000:.0f}nm")
+    print(f"  NA={config.microscope.NA}, ni={config.microscope.ni}, ns={config.microscope.ns}")
 
-    # 1. Gibson-Lanni PSF - MATCHING MAKEFILE PARAMETERS
-    print("\n1. Gibson-Lanni PSF (oil→cells)")
-    print(f"   Parameters: NA={NA}, ni={ni}, wvl={wvl*1000:.0f}nm, {dxy*1000:.0f}nm/{dz*1000:.0f}nm")
-    psf_gl = dwpy.generate_psf_gl(
-        dxy=dxy, dz=dz,
-        xy_size=181, z_size=79,  # Match supplied PSF dimensions
-        NA=NA, ni=ni, ns=1.38, wvl=wvl, M=M_mag,
-        ti0=150.0, tg=170.0, ng=ni  # Use same RI for coverslip
+    # Generate PSFs using configuration
+    print("\n" + "=" * 70)
+    print("GENERATING PSFs FROM CONFIG (AUTO-SIZED)")
+    print("=" * 70)
+
+    # Calculate auto size
+    xy_size, z_size = dwpy.auto_psf_size_c_heuristic(
+        dxy=config.imaging.dxy,
+        dz=config.imaging.dz,
+        NA=config.microscope.NA,
+        wvl=config.imaging.wavelength,
+        ni=config.microscope.ni
     )
+    print(f"Auto-calculated PSF size: {xy_size}×{xy_size}×{z_size}")
+
+    # 1. Gibson-Lanni PSF from config
+    print("\n1. Gibson-Lanni PSF (from config)")
+    psf_gl = dwpy.generate_psf_from_config(config)
     print(f"   Generated: {psf_gl.shape}, sum={psf_gl.sum():.6f}")
     tf.imwrite(output_dir / "PSF_GL.tif", np.transpose(psf_gl, (2, 1, 0)))
 
-    # 2. Born-Wolf PSF - MATCHING MAKEFILE PARAMETERS
-    print("\n2. Born-Wolf PSF (reference)")
-    print(f"   Parameters: NA={NA}, ni={ni}, wvl={wvl*1000:.0f}nm, {dxy*1000:.0f}nm/{dz*1000:.0f}nm")
-    psf_bw = dwpy.generate_psf_bw(
-        dxy=dxy, dz=dz,
-        xy_size=181, z_size=79,  # Match supplied PSF dimensions
-        NA=NA, ni=ni, wvl=wvl
-    )
+    # 2. Born-Wolf PSF (modify config to use BW)
+    print("\n2. Born-Wolf PSF (config → BW model)")
+    config_bw = dwpy.ExperimentConfig.from_dict(config.to_dict())
+    config_bw.psf.model = "bw"
+    psf_bw = dwpy.generate_psf_from_config(config_bw)
     print(f"   Generated: {psf_bw.shape}, sum={psf_bw.sum():.6f}")
     tf.imwrite(output_dir / "PSF_BW.tif", np.transpose(psf_bw, (2, 1, 0)))
 
-    # Configuration for DAPI (match C defaults)
+    # Create DeconvolutionConfig from config file
     cfg = dwpy.DeconvolutionConfig(
-        n_iter=20,
-        border_quality=2,
-        positivity=True,
-        metric="idiv",
-        use_weights=True,
-        offset=5.0,  # DAPI has background ~1758, use offset
-        pad_fast_fft=True,
-        alphamax=1.0,
+        n_iter=config.deconvolution.n_iter,
+        border_quality=config.deconvolution.border_quality,
+        positivity=config.deconvolution.positivity,
+        metric=config.deconvolution.metric,
+        use_weights=config.deconvolution.use_weights,
+        offset=config.deconvolution.offset,
+        pad_fast_fft=config.deconvolution.pad_fast_fft,
+        alphamax=config.deconvolution.alphamax,
     )
 
-    print(f"\nConfiguration: {cfg.n_iter} iterations, SHB method, JAX backend")
-    print(f"  offset={cfg.offset} (accounts for DAPI background)")
+    print(f"\nDeconvolution config from file:")
+    print(f"  {cfg.n_iter} iterations, {config.deconvolution.method} method")
+    print(f"  Backend: {config.deconvolution.backend}")
+    print(f"  offset={cfg.offset}")
 
     results = {}
 
