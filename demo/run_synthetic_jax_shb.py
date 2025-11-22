@@ -1,12 +1,15 @@
 """
-Run JAX SHB deconvolution on synthetic dataset with GL and BW PSF comparison.
+Run JAX SHB deconvolution on synthetic dataset with three-way PSF comparison.
 
 This script:
   - Loads synthetic dataset with ground truth
-  - Generates both Gibson-Lanni and Born-Wolf PSFs
-  - Runs JAX SHB deconvolution with 50 iterations
-  - Compares results against ground truth
-  - Saves outputs and quality metrics
+  - Tests THREE PSF models:
+    1. Supplied PSF (from dataset)
+    2. Gibson-Lanni PSF (generated, accounts for RI mismatch)
+    3. Born-Wolf PSF (generated, reference model)
+  - Runs JAX SHB deconvolution with 50 iterations for each
+  - Compares results against ground truth (PSNR, NRMSE, RelErr)
+  - Shows which PSF model produces best reconstruction
 
 Usage (from repo root):
     python demo/run_synthetic_jax_shb.py
@@ -65,13 +68,16 @@ def main():
     print("\nLoading synthetic dataset...")
     im_zyx = tf.imread(data_dir / "input.tif").astype(np.float32)
     ground_truth = tf.imread(data_dir / "ground-truth.tif").astype(np.float32)
+    psf_supplied_zyx = tf.imread(data_dir / "psf.tif").astype(np.float32)
 
     # Convert to XYZ for processing
     im_xyz = np.transpose(im_zyx, (2, 1, 0))
+    psf_supplied = np.transpose(psf_supplied_zyx, (2, 1, 0))
     M, N, P = im_xyz.shape
 
     print(f"  Image: {im_xyz.shape} (XYZ) = {im_zyx.shape} (ZYX)")
     print(f"  Ground truth: {ground_truth.shape} (ZYX)")
+    print(f"  Supplied PSF: {psf_supplied.shape} (XYZ)")
 
     # Determine voxel sizes (typical for this dataset)
     dxy = 0.1  # 100nm lateral pixels
@@ -91,6 +97,12 @@ def main():
 
     print(f"Image dimensions: {M}×{N}×{P}")
     print(f"Generating PSFs to match (auto-sized then padded)...")
+
+    # 0. Use supplied PSF from dataset
+    print("\n0. Supplied PSF (from dataset)")
+    psf_supplied_norm = psf_supplied / psf_supplied.sum()
+    print(f"   Loaded: {psf_supplied.shape}, sum={psf_supplied_norm.sum():.6f}")
+    print(f"   ✓ Already matches image size")
 
     # 1. Gibson-Lanni PSF (auto-sized and padded to image dimensions)
     print("\n1. Gibson-Lanni PSF (oil→cells)")
@@ -128,6 +140,39 @@ def main():
     print(f"\nConfiguration: {cfg.n_iter} iterations, SHB method, JAX backend")
 
     results = {}
+
+    # Run with supplied PSF
+    print("\n" + "=" * 70)
+    print("DECONVOLUTION WITH SUPPLIED PSF")
+    print("=" * 70)
+
+    try:
+        import jax
+        print(f"JAX backend: {jax.default_backend()}")
+
+        start = time.perf_counter()
+        result_supplied = dwpy.deconvolve_fast(
+            im_xyz, psf_supplied_norm,
+            method="shb",
+            backend="jax",
+            cfg=cfg
+        )
+        elapsed_supplied = time.perf_counter() - start
+
+        print(f"✓ Completed in {elapsed_supplied:.2f}s ({elapsed_supplied/cfg.n_iter:.2f}s/iter)")
+
+        # Save output
+        result_supplied_zyx = np.transpose(result_supplied, (2, 1, 0))
+        tf.imwrite(output_dir / "output_JAX_SHB_Supplied.tif", result_supplied_zyx)
+        print(f"  Saved: output_JAX_SHB_Supplied.tif")
+
+        # Calculate metrics
+        metrics_supplied = calculate_metrics(result_supplied_zyx, ground_truth, "\nQuality Metrics (Supplied PSF):")
+        results["Supplied"] = {"time": elapsed_supplied, "metrics": metrics_supplied}
+
+    except ImportError as e:
+        print(f"✗ JAX not available: {e}")
+        return 1
 
     # Run with Gibson-Lanni PSF
     print("\n" + "=" * 70)
@@ -189,26 +234,28 @@ def main():
 
     # Comparison summary
     print("\n" + "=" * 70)
-    print("COMPARISON SUMMARY")
+    print("THREE-WAY PSF COMPARISON SUMMARY")
     print("=" * 70)
 
     print(f"\n{'PSF Model':<15} {'PSNR (dB)':<12} {'NRMSE':<10} {'RelErr %':<10} {'Time (s)'}")
     print("-" * 70)
 
-    for name in ["GL", "BW"]:
-        m = results[name]["metrics"]
-        t = results[name]["time"]
-        print(f"{name:<15} {m['psnr']:>8.2f}    {m['nrmse']:>6.4f}    {m['rel_error']:>6.2f}     {t:>6.1f}")
+    # Sort by PSNR (best first)
+    for name, data in sorted(results.items(), key=lambda x: x[1]['metrics']['psnr'], reverse=True):
+        m = data["metrics"]
+        t = data["time"]
+        marker = "🏆" if m['psnr'] == max(r['metrics']['psnr'] for r in results.values()) else "  "
+        print(f"{marker} {name:<13} {m['psnr']:>8.2f}    {m['nrmse']:>6.4f}    {m['rel_error']:>6.2f}     {t:>6.1f}")
 
-    # Determine winner
-    if metrics_gl["psnr"] > metrics_bw["psnr"]:
-        improvement = metrics_gl["psnr"] - metrics_bw["psnr"]
-        print(f"\n🏆 Gibson-Lanni PSF produces better quality (+{improvement:.2f} dB)")
-    elif metrics_bw["psnr"] > metrics_gl["psnr"]:
-        improvement = metrics_bw["psnr"] - metrics_gl["psnr"]
-        print(f"\n🏆 Born-Wolf PSF produces better quality (+{improvement:.2f} dB)")
-    else:
-        print(f"\n⚖️  Both PSF models produce similar quality")
+    # Show improvements
+    best_name = max(results.items(), key=lambda x: x[1]['metrics']['psnr'])[0]
+    best_psnr = results[best_name]['metrics']['psnr']
+
+    print(f"\n🏆 Best quality: {best_name} (PSNR={best_psnr:.2f} dB)")
+
+    if "Supplied" in results and best_name != "Supplied":
+        improvement = best_psnr - results["Supplied"]["metrics"]["psnr"]
+        print(f"   Improvement over supplied PSF: +{improvement:.2f} dB")
 
     print("\n" + "=" * 70)
     print(f"Results saved to: {output_dir}/")
