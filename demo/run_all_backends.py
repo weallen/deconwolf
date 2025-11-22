@@ -2,19 +2,17 @@
 Run multiple deconvolution backends on the demo DAPI dataset and save outputs.
 
 Backends covered:
-  - NumPy RL
-  - NumPy SHB
-  - JAX RL (via dw_fast)
-  - JAX SHB (via dw_fast)
+  - NumPy RL/SHB
+  - JAX RL/SHB (via dw_fast)
   - Numba RL/SHB
   - FFTW RL/SHB
 
-PSF is generated using Gibson-Lanni model to account for refractive index
-mismatch between oil immersion (ni=1.515) and cellular specimen (ns=1.38).
+Runs with BOTH PSF models for comparison:
+  - Gibson-Lanni (GL): Accounts for RI mismatch (oil→cells)
+  - Born-Wolf (BW): Simpler model for reference
 
-Outputs are written next to the demo data, transposed back to ZYX so they
-align with the original TIFFs in viewers like Napari. Settings match the C
-defaults: offset=5, Bertero weights (border_quality=2), metric=idiv.
+Outputs are written to demo/outputs/dapi_dataset/, transposed back to ZYX
+so they align with the original TIFFs in viewers like Napari.
 
 Usage (from repo root):
     python demo/run_all_backends.py
@@ -62,40 +60,57 @@ def load_demo():
     # TIFFs are ZYX; convert to internal XYZ
     im_xyz = np.transpose(im, (2, 1, 0))
 
-    # Generate Gibson-Lanni PSF for DAPI imaging
-    # Parameters for 60x/1.4NA oil immersion into cellular specimen
-    print("Generating Gibson-Lanni PSF for DAPI (oil immersion into cells)...")
-    print("  Parameters: 60x/1.4NA, λ=466nm, ni=1.515 (oil), ns=1.38 (cells)")
-
-    # Get voxel sizes from image metadata or use typical values
-    # Typical DAPI imaging: 65nm lateral, 200nm axial
+    # Common parameters for DAPI imaging
     dxy = 0.065  # microns (65nm lateral pixel size)
     dz = 0.200   # microns (200nm z-step)
 
-    psf_xyz = psf_module.generate_psf_gl(
+    # Generate BOTH PSF models for comparison
+    print("Generating PSFs for DAPI imaging (60x/1.4NA, λ=466nm)...")
+    print("=" * 70)
+
+    # 1. Gibson-Lanni PSF (accounts for RI mismatch)
+    print("\n1. Gibson-Lanni PSF (oil→cells RI mismatch)")
+    print("   Parameters: ni=1.515 (oil), ns=1.38 (cells)")
+    psf_gl = psf_module.generate_psf_gl(
         dxy=dxy,
         dz=dz,
-        xy_size=181,       # Match existing PSF size (181x181x79)
+        xy_size=181,       # Match existing PSF size
         z_size=79,
-        NA=1.4,            # High NA oil immersion
-        ni=1.515,          # Oil immersion medium
-        ns=1.38,           # Cellular refractive index
-        wvl=0.466,         # DAPI emission peak (466nm)
-        M=60.0,            # 60x magnification
-        ti0=150.0,         # Working distance (μm)
-        tg=170.0,          # Coverslip thickness (μm)
-        ng=1.515,          # Coverslip RI
+        NA=1.4,
+        ni=1.515,          # Oil immersion
+        ns=1.38,           # Cellular RI
+        wvl=0.466,         # DAPI emission
+        M=60.0,
+        ti0=150.0,
+        tg=170.0,
+        ng=1.515,
     )
+    psf_gl_path = output_dir / "PSF_dapi_GL.tif"
+    save_tif_xyz_as_zyx(psf_gl_path, psf_gl)
+    print(f"   Saved: {psf_gl_path.name}")
 
-    # Save the generated PSF for inspection
-    psf_path = output_dir / "PSF_dapi_GL.tif"
-    save_tif_xyz_as_zyx(psf_path, psf_xyz)
-    print(f"Generated PSF saved to: {psf_path}")
-    print(f"  Shape (XYZ): {psf_xyz.shape}")
-    print(f"  Normalization: {psf_xyz.sum():.6f}")
+    # 2. Born-Wolf PSF (simpler model)
+    print("\n2. Born-Wolf PSF (reference)")
+    print("   Parameters: ni=1.515 (oil)")
+    psf_bw = psf_module.generate_psf_bw(
+        dxy=dxy,
+        dz=dz,
+        xy_size=181,
+        z_size=79,
+        NA=1.4,
+        ni=1.515,
+        wvl=0.466,
+    )
+    psf_bw_path = output_dir / "PSF_dapi_BW.tif"
+    save_tif_xyz_as_zyx(psf_bw_path, psf_bw)
+    print(f"   Saved: {psf_bw_path.name}")
+
+    print("\n" + "=" * 70)
+    print(f"PSFs generated: shape={psf_gl.shape}")
+    print(f"  GL sum: {psf_gl.sum():.6f}, BW sum: {psf_bw.sum():.6f}")
     print()
 
-    return output_dir, im_xyz, psf_xyz
+    return output_dir, im_xyz, psf_gl, psf_bw
 
 
 def save_tif_xyz_as_zyx(path: Path, arr_xyz: np.ndarray) -> None:
@@ -107,20 +122,7 @@ def save_tif_xyz_as_zyx(path: Path, arr_xyz: np.ndarray) -> None:
     )
 
 
-def save_uint16_scaled(path: Path, arr_xyz: np.ndarray) -> None:
-    """Match the C output scaling: auto-scale to 16-bit and write uint16."""
-    arr_zyx = np.transpose(arr_xyz.astype(np.float32), (2, 1, 0))
-    maxv = float(arr_zyx.max()) if arr_zyx.size else 1.0
-    scale = 65535.0 / maxv if maxv > 0 else 1.0
-    arr_u16 = np.clip(arr_zyx * scale, 0, 65535).astype(np.uint16)
-    tf.imwrite(path, arr_u16)
-    print(
-        f"[wrote] {path} (uint16 scaled) scale={scale:.6f} "
-        f"zyx_shape={arr_u16.shape} min={arr_u16.min()} max={arr_u16.max()}"
-    )
-
-
-def run_numpy(im: np.ndarray, psf: np.ndarray, method: str, demo_dir: Path, n_iter: int = 20) -> None:
+def run_numpy(im: np.ndarray, psf: np.ndarray, method: str, psf_name: str, demo_dir: Path, n_iter: int = 20) -> None:
     cfg = dw_numpy.DeconvolutionConfig(
         n_iter=n_iter,
         border_quality=2,
@@ -134,12 +136,11 @@ def run_numpy(im: np.ndarray, psf: np.ndarray, method: str, demo_dir: Path, n_it
         alphamax=1.0,
     )
     out = dw_numpy.deconvolve(im, psf, method=method, cfg=cfg)
-    out_path = demo_dir / f"dw_dapi_numpy_{method}.tif"
+    out_path = demo_dir / f"dw_dapi_numpy_{method}_{psf_name}.tif"
     save_tif_xyz_as_zyx(out_path, out)
-    save_uint16_scaled(demo_dir / f"dw_dapi_numpy_{method}_u16.tif", out)
 
 
-def run_fast_jax(im: np.ndarray, psf: np.ndarray, method: str, demo_dir: Path, n_iter: int = 20) -> None:
+def run_fast_jax(im: np.ndarray, psf: np.ndarray, method: str, psf_name: str, demo_dir: Path, n_iter: int = 20) -> None:
     try:
         import jax  # noqa: F401
     except ImportError as exc:  # pragma: no cover - optional dep
@@ -159,12 +160,11 @@ def run_fast_jax(im: np.ndarray, psf: np.ndarray, method: str, demo_dir: Path, n
         alphamax=1.0,
     )
     out = dw_fast.deconvolve_fast(im, psf, method=method, backend="jax", cfg=cfg)
-    out_path = demo_dir / f"dw_dapi_fastjax_{method}.tif"
+    out_path = demo_dir / f"dw_dapi_fastjax_{method}_{psf_name}.tif"
     save_tif_xyz_as_zyx(out_path, out)
-    save_uint16_scaled(demo_dir / f"dw_dapi_fastjax_{method}_u16.tif", out)
 
 
-def run_fast_numba(im: np.ndarray, psf: np.ndarray, method: str, demo_dir: Path, n_iter: int = 20) -> None:
+def run_fast_numba(im: np.ndarray, psf: np.ndarray, method: str, psf_name: str, demo_dir: Path, n_iter: int = 20) -> None:
     try:
         import numba  # noqa: F401
     except ImportError as exc:  # pragma: no cover - optional dep
@@ -184,12 +184,11 @@ def run_fast_numba(im: np.ndarray, psf: np.ndarray, method: str, demo_dir: Path,
         alphamax=1.0,
     )
     out = dw_fast.deconvolve_fast(im, psf, method=method, backend="numba", cfg=cfg)
-    out_path = demo_dir / f"dw_dapi_fastnumba_{method}.tif"
+    out_path = demo_dir / f"dw_dapi_fastnumba_{method}_{psf_name}.tif"
     save_tif_xyz_as_zyx(out_path, out)
-    save_uint16_scaled(demo_dir / f"dw_dapi_fastnumba_{method}_u16.tif", out)
 
 
-def run_fast_fftw(im: np.ndarray, psf: np.ndarray, method: str, demo_dir: Path, n_iter: int = 20) -> None:
+def run_fast_fftw(im: np.ndarray, psf: np.ndarray, method: str, psf_name: str, demo_dir: Path, n_iter: int = 20) -> None:
     try:
         import pyfftw  # noqa: F401
     except ImportError as exc:  # pragma: no cover - optional dep
@@ -210,23 +209,46 @@ def run_fast_fftw(im: np.ndarray, psf: np.ndarray, method: str, demo_dir: Path, 
         fftw_threads=1,
     )
     out = dw_fast.deconvolve_fast(im, psf, method=method, backend="fftw", cfg=cfg)
-    out_path = demo_dir / f"dw_dapi_fastfftw_{method}.tif"
+    out_path = demo_dir / f"dw_dapi_fastfftw_{method}_{psf_name}.tif"
     save_tif_xyz_as_zyx(out_path, out)
-    save_uint16_scaled(demo_dir / f"dw_dapi_fastfftw_{method}_u16.tif", out)
 
 
 def main():
-    demo_dir, im_xyz, psf_xyz = load_demo()
+    demo_dir, im_xyz, psf_gl, psf_bw = load_demo()
 
-    run_numpy(im_xyz, psf_xyz, method="rl", demo_dir=demo_dir)
-    run_numpy(im_xyz, psf_xyz, method="shb", demo_dir=demo_dir)
+    print("\n" + "=" * 70)
+    print("RUNNING DECONVOLUTION WITH BOTH PSF MODELS")
+    print("=" * 70)
 
-    run_fast_jax(im_xyz, psf_xyz, method="rl", demo_dir=demo_dir)
-    run_fast_jax(im_xyz, psf_xyz, method="shb", demo_dir=demo_dir)
-    run_fast_numba(im_xyz, psf_xyz, method="rl", demo_dir=demo_dir)
-    run_fast_numba(im_xyz, psf_xyz, method="shb", demo_dir=demo_dir)
-    run_fast_fftw(im_xyz, psf_xyz, method="rl", demo_dir=demo_dir)
-    run_fast_fftw(im_xyz, psf_xyz, method="shb", demo_dir=demo_dir)
+    # Run with Gibson-Lanni PSF
+    print("\n>>> Using Gibson-Lanni PSF (GL)")
+    print("-" * 70)
+    run_numpy(im_xyz, psf_gl, method="rl", psf_name="GL", demo_dir=demo_dir)
+    run_numpy(im_xyz, psf_gl, method="shb", psf_name="GL", demo_dir=demo_dir)
+    run_fast_jax(im_xyz, psf_gl, method="rl", psf_name="GL", demo_dir=demo_dir)
+    run_fast_jax(im_xyz, psf_gl, method="shb", psf_name="GL", demo_dir=demo_dir)
+    run_fast_numba(im_xyz, psf_gl, method="rl", psf_name="GL", demo_dir=demo_dir)
+    run_fast_numba(im_xyz, psf_gl, method="shb", psf_name="GL", demo_dir=demo_dir)
+    run_fast_fftw(im_xyz, psf_gl, method="rl", psf_name="GL", demo_dir=demo_dir)
+    run_fast_fftw(im_xyz, psf_gl, method="shb", psf_name="GL", demo_dir=demo_dir)
+
+    # Run with Born-Wolf PSF
+    print("\n>>> Using Born-Wolf PSF (BW)")
+    print("-" * 70)
+    run_numpy(im_xyz, psf_bw, method="rl", psf_name="BW", demo_dir=demo_dir)
+    run_numpy(im_xyz, psf_bw, method="shb", psf_name="BW", demo_dir=demo_dir)
+    run_fast_jax(im_xyz, psf_bw, method="rl", psf_name="BW", demo_dir=demo_dir)
+    run_fast_jax(im_xyz, psf_bw, method="shb", psf_name="BW", demo_dir=demo_dir)
+    run_fast_numba(im_xyz, psf_bw, method="rl", psf_name="BW", demo_dir=demo_dir)
+    run_fast_numba(im_xyz, psf_bw, method="shb", psf_name="BW", demo_dir=demo_dir)
+    run_fast_fftw(im_xyz, psf_bw, method="rl", psf_name="BW", demo_dir=demo_dir)
+    run_fast_fftw(im_xyz, psf_bw, method="shb", psf_name="BW", demo_dir=demo_dir)
+
+    print("\n" + "=" * 70)
+    print("COMPLETE")
+    print("=" * 70)
+    print(f"Outputs saved to: {demo_dir}")
+    print("Compare GL vs BW results to see the effect of RI mismatch modeling!")
 
 
 if __name__ == "__main__":
