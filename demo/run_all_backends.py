@@ -6,17 +6,18 @@ Backends covered:
   - NumPy SHB
   - JAX RL (via dw_fast)
   - JAX SHB (via dw_fast)
+  - Numba RL/SHB
+  - FFTW RL/SHB
+
+PSF is generated using Gibson-Lanni model to account for refractive index
+mismatch between oil immersion (ni=1.515) and cellular specimen (ns=1.38).
 
 Outputs are written next to the demo data, transposed back to ZYX so they
 align with the original TIFFs in viewers like Napari. Settings match the C
-defaults used by demo/makefile: PSF_dapi.tif, offset=5, Bertero weights
-(border_quality=2), metric=idiv, XY crop factor 0.001.
-
-We now also emit an optional C-style uint16 export (auto-scaled to 0–65535)
-alongside the float32 outputs, and enable FFT padding to next-fast shapes.
+defaults: offset=5, Bertero weights (border_quality=2), metric=idiv.
 
 Usage (from repo root):
-    /Users/wea/miniforge3/envs/dwpy/bin/python demo/run_all_backends.py
+    python demo/run_all_backends.py
 """
 
 from __future__ import annotations
@@ -47,6 +48,7 @@ def _import_module(path: Path, module_name: str):
 PYTHON_DIR = ROOT / "dwpy"
 dw_fast = _import_module(PYTHON_DIR / "dw_fast.py", "dwpy.dw_fast")
 dw_numpy = _import_module(PYTHON_DIR / "dw_numpy.py", "dwpy.dw_numpy")
+psf_module = _import_module(PYTHON_DIR / "psf.py", "dwpy.psf")
 
 
 def load_demo():
@@ -55,11 +57,44 @@ def load_demo():
     output_dir = demo_dir / "outputs" / "dapi_dataset"
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Load image
     im = tf.imread(data_dir / "dapi_001.tif").astype(np.float32)
-    psf = tf.imread(data_dir / "PSF_dapi.tif").astype(np.float32)
     # TIFFs are ZYX; convert to internal XYZ
     im_xyz = np.transpose(im, (2, 1, 0))
-    psf_xyz = np.transpose(psf, (2, 1, 0))
+
+    # Generate Gibson-Lanni PSF for DAPI imaging
+    # Parameters for 60x/1.4NA oil immersion into cellular specimen
+    print("Generating Gibson-Lanni PSF for DAPI (oil immersion into cells)...")
+    print("  Parameters: 60x/1.4NA, λ=466nm, ni=1.515 (oil), ns=1.38 (cells)")
+
+    # Get voxel sizes from image metadata or use typical values
+    # Typical DAPI imaging: 65nm lateral, 200nm axial
+    dxy = 0.065  # microns (65nm lateral pixel size)
+    dz = 0.200   # microns (200nm z-step)
+
+    psf_xyz = psf_module.generate_psf_gl(
+        dxy=dxy,
+        dz=dz,
+        xy_size=51,        # Larger PSF for better coverage
+        z_size=51,
+        NA=1.4,            # High NA oil immersion
+        ni=1.515,          # Oil immersion medium
+        ns=1.38,           # Cellular refractive index
+        wvl=0.466,         # DAPI emission peak (466nm)
+        M=60.0,            # 60x magnification
+        ti0=150.0,         # Working distance (μm)
+        tg=170.0,          # Coverslip thickness (μm)
+        ng=1.515,          # Coverslip RI
+    )
+
+    # Save the generated PSF for inspection
+    psf_path = output_dir / "PSF_dapi_GL.tif"
+    save_tif_xyz_as_zyx(psf_path, psf_xyz)
+    print(f"Generated PSF saved to: {psf_path}")
+    print(f"  Shape (XYZ): {psf_xyz.shape}")
+    print(f"  Normalization: {psf_xyz.sum():.6f}")
+    print()
+
     return output_dir, im_xyz, psf_xyz
 
 
