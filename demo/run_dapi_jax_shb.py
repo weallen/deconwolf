@@ -2,14 +2,15 @@
 Run JAX SHB deconvolution on DAPI dataset with three-way PSF comparison.
 
 This script:
-  - Loads DAPI dataset (no ground truth available)
+  - Loads DAPI dataset
+  - Uses C benchmark result (dw_c_benchmark.tif) as ground truth if available
   - Tests THREE PSF models:
     1. Supplied PSF (PSF_dapi.tif if available, 181×181×79)
     2. Gibson-Lanni PSF (generated, compact: ~17×17×21)
     3. Born-Wolf PSF (generated, compact: ~17×17×21)
   - Runs JAX SHB deconvolution with 50 iterations for each
-  - Saves outputs for visual comparison
-  - Demonstrates memory-efficient PSF sizing
+  - Compares against C benchmark (PSNR, NRMSE, RelErr)
+  - Demonstrates memory-efficient compact PSF sizing (99.77% smaller!)
 
 Usage (from repo root):
     python demo/run_dapi_jax_shb.py
@@ -32,6 +33,27 @@ if str(ROOT) not in sys.path:
 import dwpy
 
 
+def calculate_metrics(output, ground_truth, name=""):
+    """Calculate reconstruction quality metrics"""
+    if output.shape != ground_truth.shape:
+        print(f"  ⚠ Shape mismatch: {output.shape} vs {ground_truth.shape}")
+        return None
+
+    mse = np.mean((output - ground_truth) ** 2)
+    max_val = ground_truth.max()
+    psnr = 10 * np.log10((max_val ** 2) / mse) if mse > 0 else float('inf')
+    nrmse = np.sqrt(mse) / (ground_truth.max() - ground_truth.min())
+    rel_error = np.mean(np.abs(output - ground_truth) / (ground_truth + 1e-6)) * 100
+
+    print(f"{name}")
+    print(f"  PSNR:   {psnr:.2f} dB")
+    print(f"  NRMSE:  {nrmse:.4f}")
+    print(f"  RelErr: {rel_error:.2f}%")
+    print(f"  Range:  [{output.min():.1f}, {output.max():.1f}]")
+
+    return {"psnr": psnr, "nrmse": nrmse, "rel_error": rel_error, "mse": mse}
+
+
 def main():
     # Setup paths
     demo_dir = Path(__file__).resolve().parent
@@ -46,6 +68,15 @@ def main():
     # Load data
     print("\nLoading DAPI dataset...")
     im_zyx = tf.imread(data_dir / "dapi_001.tif").astype(np.float32)
+
+    # Load C benchmark as ground truth reference
+    ground_truth_path = demo_dir / "outputs" / "dapi_dataset" / "dw_c_benchmark.tif"
+    ground_truth = None
+    if ground_truth_path.exists():
+        ground_truth = tf.imread(ground_truth_path).astype(np.float32)
+        print(f"  Ground truth (C benchmark): {ground_truth.shape} (ZYX)")
+    else:
+        print(f"  Ground truth not found at {ground_truth_path}")
 
     # Convert to XYZ for processing
     im_xyz = np.transpose(im_zyx, (2, 1, 0))
@@ -146,9 +177,15 @@ def main():
             result_supplied_zyx = np.transpose(result_supplied, (2, 1, 0))
             tf.imwrite(output_dir / "output_JAX_SHB_Supplied.tif", result_supplied_zyx)
             print(f"  Saved: output_JAX_SHB_Supplied.tif")
-            print(f"  Output range: [{result_supplied_zyx.min():.1f}, {result_supplied_zyx.max():.1f}]")
 
-            results["Supplied"] = {"time": elapsed_supplied}
+            # Calculate metrics if ground truth available
+            metrics_supplied = None
+            if ground_truth is not None:
+                metrics_supplied = calculate_metrics(result_supplied_zyx, ground_truth, "\nQuality Metrics (Supplied PSF):")
+                results["Supplied"] = {"time": elapsed_supplied, "metrics": metrics_supplied}
+            else:
+                print(f"  Output range: [{result_supplied_zyx.min():.1f}, {result_supplied_zyx.max():.1f}]")
+                results["Supplied"] = {"time": elapsed_supplied}
 
         except ImportError as e:
             print(f"✗ JAX not available: {e}")
@@ -179,9 +216,14 @@ def main():
         result_gl_zyx = np.transpose(result_gl, (2, 1, 0))
         tf.imwrite(output_dir / "output_JAX_SHB_GL.tif", result_gl_zyx)
         print(f"  Saved: output_JAX_SHB_GL.tif")
-        print(f"  Output range: [{result_gl_zyx.min():.1f}, {result_gl_zyx.max():.1f}]")
 
-        results["GL"] = {"time": elapsed_gl}
+        # Calculate metrics if ground truth available
+        if ground_truth is not None:
+            metrics_gl = calculate_metrics(result_gl_zyx, ground_truth, "\nQuality Metrics (GL PSF):")
+            results["GL"] = {"time": elapsed_gl, "metrics": metrics_gl}
+        else:
+            print(f"  Output range: [{result_gl_zyx.min():.1f}, {result_gl_zyx.max():.1f}]")
+            results["GL"] = {"time": elapsed_gl}
 
     except ImportError as e:
         print(f"✗ JAX not available: {e}")
@@ -207,30 +249,61 @@ def main():
     result_bw_zyx = np.transpose(result_bw, (2, 1, 0))
     tf.imwrite(output_dir / "output_JAX_SHB_BW.tif", result_bw_zyx)
     print(f"  Saved: output_JAX_SHB_BW.tif")
-    print(f"  Output range: [{result_bw_zyx.min():.1f}, {result_bw_zyx.max():.1f}]")
 
-    results["BW"] = {"time": elapsed_bw}
+    # Calculate metrics if ground truth available
+    if ground_truth is not None:
+        metrics_bw = calculate_metrics(result_bw_zyx, ground_truth, "\nQuality Metrics (BW PSF):")
+        results["BW"] = {"time": elapsed_bw, "metrics": metrics_bw}
+    else:
+        print(f"  Output range: [{result_bw_zyx.min():.1f}, {result_bw_zyx.max():.1f}]")
+        results["BW"] = {"time": elapsed_bw}
 
     # Comparison summary
     print("\n" + "=" * 70)
-    print("PSF COMPARISON SUMMARY")
+    if ground_truth is not None:
+        print("THREE-WAY PSF COMPARISON SUMMARY (vs C Benchmark)")
+    else:
+        print("PSF COMPARISON SUMMARY")
     print("=" * 70)
 
-    print(f"\n{'PSF Model':<15} {'Time (s)':<12} {'Notes'}")
-    print("-" * 70)
+    # If we have metrics, show quality comparison
+    if ground_truth is not None and all("metrics" in r for r in results.values()):
+        print(f"\n{'PSF Model':<15} {'PSNR (dB)':<12} {'NRMSE':<10} {'RelErr %':<10} {'Time (s)'}")
+        print("-" * 70)
 
-    for name, data in results.items():
-        t = data["time"]
-        notes = {
-            "Supplied": "Original dataset PSF",
-            "GL": "RI mismatch (oil→cells)",
-            "BW": "Reference model",
-        }.get(name, "")
-        print(f"   {name:<13} {t:>6.1f}       {notes}")
+        # Sort by PSNR (best first)
+        for name, data in sorted(results.items(), key=lambda x: x[1]['metrics']['psnr'], reverse=True):
+            m = data["metrics"]
+            t = data["time"]
+            marker = "🏆" if m['psnr'] == max(r['metrics']['psnr'] for r in results.values()) else "  "
+            print(f"{marker} {name:<13} {m['psnr']:>8.2f}    {m['nrmse']:>6.4f}    {m['rel_error']:>6.2f}     {t:>6.1f}")
+
+        # Show best
+        best_name = max(results.items(), key=lambda x: x[1]['metrics']['psnr'])[0]
+        best_psnr = results[best_name]['metrics']['psnr']
+        print(f"\n🏆 Best quality: {best_name} (PSNR={best_psnr:.2f} dB)")
+
+        if "Supplied" in results and best_name != "Supplied":
+            improvement = best_psnr - results["Supplied"]["metrics"]["psnr"]
+            print(f"   Improvement over supplied PSF: {improvement:+.2f} dB")
+    else:
+        # No metrics, just show timing
+        print(f"\n{'PSF Model':<15} {'Time (s)':<12} {'Notes'}")
+        print("-" * 70)
+
+        for name, data in results.items():
+            t = data["time"]
+            notes = {
+                "Supplied": "Original dataset PSF",
+                "GL": "RI mismatch (oil→cells), compact",
+                "BW": "Reference model, compact",
+            }.get(name, "")
+            print(f"   {name:<13} {t:>6.1f}       {notes}")
+
+        print("\n" + "=" * 70)
+        print("Note: Compare outputs visually in napari or similar viewer")
 
     print("\n" + "=" * 70)
-    print("Note: No ground truth available for DAPI dataset")
-    print("Compare outputs visually in napari or similar viewer")
     print(f"Results saved to: {output_dir}/")
     print("=" * 70)
 
