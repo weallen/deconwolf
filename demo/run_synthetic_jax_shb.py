@@ -68,6 +68,7 @@ def main():
 
     # Convert to XYZ for processing
     im_xyz = np.transpose(im_zyx, (2, 1, 0))
+    M, N, P = im_xyz.shape
 
     print(f"  Image: {im_xyz.shape} (XYZ) = {im_zyx.shape} (ZYX)")
     print(f"  Ground truth: {ground_truth.shape} (ZYX)")
@@ -78,36 +79,37 @@ def main():
 
     print(f"  Voxel size: {dxy}×{dxy}×{dz} μm")
 
-    # Generate PSFs
+    # Generate PSFs matching image dimensions
     print("\n" + "=" * 70)
-    print("GENERATING PSFs")
+    print("GENERATING PSFs - MATCHING IMAGE SIZE")
     print("=" * 70)
 
     # Common PSF parameters for synthetic dataset
     NA = 1.4
     wvl = 0.52  # 520nm (green)
-    M = 60
+    M_mag = 60
 
-    # Use auto-sizing for appropriate PSF dimensions
-    xy_size, z_size = dwpy.calculate_psf_size(dxy=dxy, dz=dz, NA=NA, wvl=wvl)
-    print(f"\nAuto-calculated PSF size: {xy_size}×{xy_size}×{z_size}")
+    print(f"Image dimensions: {M}×{N}×{P}")
+    print(f"Generating PSFs to match (auto-sized then padded)...")
 
-    # 1. Gibson-Lanni PSF
+    # 1. Gibson-Lanni PSF (auto-sized and padded to image dimensions)
     print("\n1. Gibson-Lanni PSF (oil→cells)")
-    psf_gl = dwpy.generate_psf_gl(
+    psf_gl = dwpy.auto_generate_psf_gl(
+        im_xyz,
         dxy=dxy, dz=dz,
-        xy_size=xy_size, z_size=z_size,
-        NA=NA, ni=1.515, ns=1.38, wvl=wvl, M=M
+        NA=NA, ni=1.515, ns=1.38, wvl=wvl, M=M_mag,
+        match_image_size=True  # Pad to match image
     )
     print(f"   Generated: {psf_gl.shape}, sum={psf_gl.sum():.6f}")
     tf.imwrite(output_dir / "PSF_GL.tif", np.transpose(psf_gl, (2, 1, 0)))
 
-    # 2. Born-Wolf PSF
+    # 2. Born-Wolf PSF (auto-sized and padded to image dimensions)
     print("\n2. Born-Wolf PSF (reference)")
-    psf_bw = dwpy.generate_psf_bw(
+    psf_bw = dwpy.auto_generate_psf_bw(
+        im_xyz,
         dxy=dxy, dz=dz,
-        xy_size=xy_size, z_size=z_size,
-        NA=NA, ni=1.515, wvl=wvl
+        NA=NA, ni=1.515, wvl=wvl,
+        match_image_size=True  # Pad to match image
     )
     print(f"   Generated: {psf_bw.shape}, sum={psf_bw.sum():.6f}")
     tf.imwrite(output_dir / "PSF_BW.tif", np.transpose(psf_bw, (2, 1, 0)))

@@ -24,6 +24,7 @@ from .dw_auto import (
 from .psf import generate_psf_bw, generate_psf_gl
 from .psf_utils import (
     calculate_psf_size,
+    pad_psf_to_image_size,
     auto_generate_psf_bw,
     auto_generate_psf_gl,
     explain_tiled_deconvolution,
@@ -56,6 +57,7 @@ __all__ = [
     "generate_psf_gl",
     # PSF utilities
     "calculate_psf_size",
+    "pad_psf_to_image_size",
     "auto_generate_psf_bw",
     "auto_generate_psf_gl",
     "explain_tiled_deconvolution",

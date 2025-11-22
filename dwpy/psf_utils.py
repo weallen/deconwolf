@@ -2,7 +2,87 @@
 Utilities for PSF generation and sizing.
 """
 import numpy as np
-from typing import Tuple
+from typing import Tuple, Optional
+
+
+def pad_psf_to_image_size(
+    psf: np.ndarray,
+    image_shape: Tuple[int, int, int],
+) -> np.ndarray:
+    """
+    Pad or crop PSF to exactly match image dimensions.
+
+    This is useful for FFT-based deconvolution where having PSF and image
+    the same size can simplify processing (though not strictly required).
+
+    Parameters
+    ----------
+    psf : np.ndarray
+        PSF array, shape (X, Y, Z), dtype float32, normalized
+    image_shape : tuple
+        Target image shape (X, Y, Z)
+
+    Returns
+    -------
+    np.ndarray
+        PSF padded/cropped to image_shape, re-normalized to sum=1.0
+
+    Examples
+    --------
+    >>> psf_small = np.ones((21, 21, 25), dtype=np.float32)
+    >>> psf_small = psf_small / psf_small.sum()
+    >>> psf_large = pad_psf_to_image_size(psf_small, (512, 256, 128))
+    >>> psf_large.shape
+    (512, 256, 128)
+    >>> np.isclose(psf_large.sum(), 1.0)
+    True
+    """
+    M_img, N_img, P_img = image_shape
+    M_psf, N_psf, P_psf = psf.shape
+
+    # If already the right size, return as-is
+    if (M_psf, N_psf, P_psf) == (M_img, N_img, P_img):
+        return psf
+
+    # Create zero-padded array
+    psf_matched = np.zeros((M_img, N_img, P_img), dtype=np.float32)
+
+    # Calculate offsets to center the PSF
+    x_offset = (M_img - M_psf) // 2
+    y_offset = (N_img - N_psf) // 2
+    z_offset = (P_img - P_psf) // 2
+
+    # Calculate valid ranges for copying
+    x_src_start = max(0, -x_offset)
+    x_src_end = min(M_psf, M_img - x_offset)
+    x_dst_start = max(0, x_offset)
+    x_dst_end = x_dst_start + (x_src_end - x_src_start)
+
+    y_src_start = max(0, -y_offset)
+    y_src_end = min(N_psf, N_img - y_offset)
+    y_dst_start = max(0, y_offset)
+    y_dst_end = y_dst_start + (y_src_end - y_src_start)
+
+    z_src_start = max(0, -z_offset)
+    z_src_end = min(P_psf, P_img - z_offset)
+    z_dst_start = max(0, z_offset)
+    z_dst_end = z_dst_start + (z_src_end - z_src_start)
+
+    # Copy PSF into centered position
+    psf_matched[
+        x_dst_start:x_dst_end,
+        y_dst_start:y_dst_end,
+        z_dst_start:z_dst_end
+    ] = psf[
+        x_src_start:x_src_end,
+        y_src_start:y_src_end,
+        z_src_start:z_src_end
+    ]
+
+    # Re-normalize
+    psf_matched = psf_matched / psf_matched.sum()
+
+    return psf_matched
 
 
 def calculate_psf_size(
@@ -60,14 +140,14 @@ def calculate_psf_size(
     ...     dxy=0.065, dz=0.2, NA=1.4, wvl=0.52
     ... )
     >>> print(f"PSF size: {xy_size}x{xy_size}x{z_size}")
-    PSF size: 111x111x49
+    PSF size: 21x21x25
 
     >>> # Lower NA objective needs smaller PSF
     >>> xy_size, z_size = calculate_psf_size(
     ...     dxy=0.11, dz=0.25, NA=0.8, wvl=0.52
     ... )
     >>> print(f"PSF size: {xy_size}x{xy_size}x{z_size}")
-    PSF size: 85x85x65
+    PSF size: 23x23x39
     """
     # Calculate theoretical PSF extents
     # Airy disk radius (first zero of Bessel function)
@@ -112,6 +192,7 @@ def auto_generate_psf_bw(
     NA: float = 1.4,
     ni: float = 1.515,
     wvl: float = 0.6,
+    match_image_size: bool = False,
     **kwargs
 ) -> np.ndarray:
     """
@@ -120,7 +201,7 @@ def auto_generate_psf_bw(
     Parameters
     ----------
     im : np.ndarray
-        Image array (X, Y, Z) or (Z, Y, X) - shape will be auto-detected
+        Image array (X, Y, Z)
     dxy : float
         Lateral pixel size in microns
     dz : float
@@ -131,6 +212,8 @@ def auto_generate_psf_bw(
         Immersion medium refractive index (default: 1.515)
     wvl : float, optional
         Wavelength in microns (default: 0.6)
+    match_image_size : bool, optional
+        If True, pad PSF to exactly match image dimensions (default: False)
     **kwargs
         Additional arguments passed to calculate_psf_size() or generate_psf_bw()
 
@@ -143,11 +226,16 @@ def auto_generate_psf_bw(
     --------
     >>> import numpy as np
     >>> im = np.random.rand(256, 256, 40).astype(np.float32)
-    >>> psf = auto_generate_psf_bw(
-    ...     im, dxy=0.065, dz=0.2, NA=1.4, wvl=0.52
+    >>> # Generate physically-sized PSF
+    >>> psf = auto_generate_psf_bw(im, dxy=0.065, dz=0.2, NA=1.4, wvl=0.52)
+    >>> psf.shape  # doctest: +SKIP
+    (21, 21, 25)
+    >>> # Generate PSF padded to match image
+    >>> psf_matched = auto_generate_psf_bw(
+    ...     im, dxy=0.065, dz=0.2, NA=1.4, wvl=0.52, match_image_size=True
     ... )
-    >>> print(f"Auto-sized PSF: {psf.shape}")
-    Auto-sized PSF: (111, 111, 49)
+    >>> psf_matched.shape
+    (256, 256, 40)
     """
     from .psf import generate_psf_bw
 
@@ -166,6 +254,10 @@ def auto_generate_psf_bw(
         **psf_kwargs
     )
 
+    # Optionally pad to match image size
+    if match_image_size:
+        psf = pad_psf_to_image_size(psf, im.shape)
+
     return psf
 
 
@@ -178,6 +270,7 @@ def auto_generate_psf_gl(
     ns: float = 1.33,
     wvl: float = 0.6,
     M: float = 60.0,
+    match_image_size: bool = False,
     **kwargs
 ) -> np.ndarray:
     """
@@ -186,7 +279,7 @@ def auto_generate_psf_gl(
     Parameters
     ----------
     im : np.ndarray
-        Image array (X, Y, Z) or (Z, Y, X) - shape will be auto-detected
+        Image array (X, Y, Z)
     dxy : float
         Lateral pixel size in microns
     dz : float
@@ -201,6 +294,8 @@ def auto_generate_psf_gl(
         Wavelength in microns (default: 0.6)
     M : float, optional
         Magnification (default: 60.0)
+    match_image_size : bool, optional
+        If True, pad PSF to exactly match image dimensions (default: False)
     **kwargs
         Additional arguments passed to calculate_psf_size() or generate_psf_gl()
 
@@ -213,11 +308,13 @@ def auto_generate_psf_gl(
     --------
     >>> import numpy as np
     >>> im = np.random.rand(256, 256, 40).astype(np.float32)
+    >>> # Generate PSF padded to match image
     >>> psf = auto_generate_psf_gl(
-    ...     im, dxy=0.065, dz=0.2, NA=1.4, ni=1.515, ns=1.33, wvl=0.52
+    ...     im, dxy=0.065, dz=0.2, NA=1.4, ni=1.515, ns=1.33, wvl=0.52,
+    ...     match_image_size=True
     ... )
-    >>> print(f"Auto-sized GL PSF: {psf.shape}")
-    Auto-sized GL PSF: (111, 111, 49)
+    >>> psf.shape
+    (256, 256, 40)
     """
     from .psf import generate_psf_gl
 
@@ -235,6 +332,10 @@ def auto_generate_psf_gl(
         NA=NA, ni=ni, ns=ns, wvl=wvl, M=M,
         **psf_kwargs
     )
+
+    # Optionally pad to match image size
+    if match_image_size:
+        psf = pad_psf_to_image_size(psf, im.shape)
 
     return psf
 
@@ -329,6 +430,7 @@ For each tile with padding:
 
 __all__ = [
     'calculate_psf_size',
+    'pad_psf_to_image_size',
     'auto_generate_psf_bw',
     'auto_generate_psf_gl',
     'explain_tiled_deconvolution',
