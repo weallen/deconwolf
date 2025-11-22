@@ -4,12 +4,13 @@ Run JAX SHB deconvolution on synthetic dataset with three-way PSF comparison.
 This script:
   - Loads synthetic dataset with ground truth
   - Tests THREE PSF models:
-    1. Supplied PSF (from dataset)
-    2. Gibson-Lanni PSF (generated, accounts for RI mismatch)
-    3. Born-Wolf PSF (generated, reference model)
+    1. Supplied PSF (from dataset, image-sized: 512×256×128)
+    2. Gibson-Lanni PSF (generated, compact: ~15×15×25)
+    3. Born-Wolf PSF (generated, compact: ~15×15×25)
   - Runs JAX SHB deconvolution with 50 iterations for each
   - Compares results against ground truth (PSNR, NRMSE, RelErr)
   - Shows which PSF model produces best reconstruction
+  - Demonstrates that compact PSFs work just as well (more efficient!)
 
 Usage (from repo root):
     python demo/run_synthetic_jax_shb.py
@@ -97,34 +98,36 @@ def main():
     M_mag = 100  # 100x magnification
 
     print(f"Image dimensions: {M}×{N}×{P}")
-    print(f"Generating PSFs to match (auto-sized then padded)...")
+    print(f"Generating physically-sized PSFs (memory efficient)...")
 
     # 0. Use supplied PSF from dataset
     print("\n0. Supplied PSF (from dataset)")
     psf_supplied_norm = psf_supplied / psf_supplied.sum()
     print(f"   Loaded: {psf_supplied.shape}, sum={psf_supplied_norm.sum():.6f}")
-    print(f"   ✓ Already matches image size")
+    print(f"   (Image-sized: {psf_supplied.shape[0]}×{psf_supplied.shape[1]}×{psf_supplied.shape[2]})")
 
-    # 1. Gibson-Lanni PSF (auto-sized and padded to image dimensions)
+    # 1. Gibson-Lanni PSF (physically-sized, efficient)
     print("\n1. Gibson-Lanni PSF (oil→cells)")
     psf_gl = dwpy.auto_generate_psf_gl(
         im_xyz,
         dxy=dxy, dz=dz,
         NA=NA, ni=1.515, ns=1.38, wvl=wvl, M=M_mag,
-        match_image_size=True  # Pad to match image
+        match_image_size=False  # Physically-sized (efficient)
     )
     print(f"   Generated: {psf_gl.shape}, sum={psf_gl.sum():.6f}")
+    print(f"   (Compact: {psf_gl.size / psf_supplied.size * 100:.1f}% of supplied PSF size)")
     tf.imwrite(output_dir / "PSF_GL.tif", np.transpose(psf_gl, (2, 1, 0)))
 
-    # 2. Born-Wolf PSF (auto-sized and padded to image dimensions)
+    # 2. Born-Wolf PSF (physically-sized, efficient)
     print("\n2. Born-Wolf PSF (reference)")
     psf_bw = dwpy.auto_generate_psf_bw(
         im_xyz,
         dxy=dxy, dz=dz,
         NA=NA, ni=1.515, wvl=wvl,
-        match_image_size=True  # Pad to match image
+        match_image_size=False  # Physically-sized (efficient)
     )
     print(f"   Generated: {psf_bw.shape}, sum={psf_bw.sum():.6f}")
+    print(f"   (Compact: {psf_bw.size / psf_supplied.size * 100:.1f}% of supplied PSF size)")
     tf.imwrite(output_dir / "PSF_BW.tif", np.transpose(psf_bw, (2, 1, 0)))
 
     # Configuration

@@ -4,11 +4,12 @@ Run JAX SHB deconvolution on DAPI dataset with three-way PSF comparison.
 This script:
   - Loads DAPI dataset (no ground truth available)
   - Tests THREE PSF models:
-    1. Supplied PSF (PSF_dapi.tif if available)
-    2. Gibson-Lanni PSF (generated, accounts for RI mismatch)
-    3. Born-Wolf PSF (generated, reference model)
+    1. Supplied PSF (PSF_dapi.tif if available, 181×181×79)
+    2. Gibson-Lanni PSF (generated, compact: ~17×17×21)
+    3. Born-Wolf PSF (generated, compact: ~17×17×21)
   - Runs JAX SHB deconvolution with 50 iterations for each
   - Saves outputs for visual comparison
+  - Demonstrates memory-efficient PSF sizing
 
 Usage (from repo root):
     python demo/run_dapi_jax_shb.py
@@ -77,27 +78,28 @@ def main():
     wvl = 0.466  # DAPI emission peak (466nm, blue)
     M_mag = 60
 
-    # For DAPI, use standard PSF sizing (not image-matched)
-    # Generate physically-appropriate size
-    print(f"\nGenerating PSFs with standard sizing (181×181×79)...")
+    # Generate physically-sized PSFs (memory efficient)
+    print(f"\nGenerating physically-sized PSFs (match_image_size=False)...")
 
     # 1. Gibson-Lanni PSF
     print("\n1. Gibson-Lanni PSF (oil→cells)")
-    psf_gl = dwpy.generate_psf_gl(
+    psf_gl = dwpy.auto_generate_psf_gl(
+        im_xyz,
         dxy=dxy, dz=dz,
-        xy_size=181, z_size=79,  # Standard size matching existing PSFs
         NA=NA, ni=1.515, ns=1.38, wvl=wvl, M=M_mag,
-        ti0=150.0, tg=170.0, ng=1.515
+        ti0=150.0, tg=170.0, ng=1.515,
+        match_image_size=False  # Physically-sized (efficient)
     )
     print(f"   Generated: {psf_gl.shape}, sum={psf_gl.sum():.6f}")
     tf.imwrite(output_dir / "PSF_GL.tif", np.transpose(psf_gl, (2, 1, 0)))
 
     # 2. Born-Wolf PSF
     print("\n2. Born-Wolf PSF (reference)")
-    psf_bw = dwpy.generate_psf_bw(
+    psf_bw = dwpy.auto_generate_psf_bw(
+        im_xyz,
         dxy=dxy, dz=dz,
-        xy_size=181, z_size=79,
-        NA=NA, ni=1.515, wvl=wvl
+        NA=NA, ni=1.515, wvl=wvl,
+        match_image_size=False  # Physically-sized (efficient)
     )
     print(f"   Generated: {psf_bw.shape}, sum={psf_bw.sum():.6f}")
     tf.imwrite(output_dir / "PSF_BW.tif", np.transpose(psf_bw, (2, 1, 0)))
