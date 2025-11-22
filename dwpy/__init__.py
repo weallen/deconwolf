@@ -22,6 +22,12 @@ from .dw_auto import (
 
 # PSF generation
 from .psf import generate_psf_bw, generate_psf_gl
+from .psf_utils import (
+    calculate_psf_size,
+    auto_generate_psf_bw,
+    auto_generate_psf_gl,
+    explain_tiled_deconvolution,
+)
 
 # Optional backends
 try:
@@ -45,9 +51,14 @@ __all__ = [
     "auto_config",
     "recommend_backend",
     "estimate_memory_usage",
-    # PSF
+    # PSF generation
     "generate_psf_bw",
     "generate_psf_gl",
+    # PSF utilities
+    "calculate_psf_size",
+    "auto_generate_psf_bw",
+    "auto_generate_psf_gl",
+    "explain_tiled_deconvolution",
     # Optional
     "dask_deconvolve",
     "deconvolve_jax",

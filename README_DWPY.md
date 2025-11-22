@@ -203,6 +203,58 @@ psf = dwpy.generate_psf_gl(
 - **Born-Wolf**: Simpler, faster, good for matched RI (e.g., oil immersion into oil-matched sample)
 - **Gibson-Lanni**: More accurate when specimen RI ≠ immersion RI (e.g., oil into water/cells), accounts for coverslip and working distance effects
 
+### Automatic PSF Sizing
+
+Let dwpy calculate the appropriate PSF size based on your optical parameters:
+
+```python
+import dwpy
+import numpy as np
+
+# Calculate recommended PSF size
+xy_size, z_size = dwpy.calculate_psf_size(
+    dxy=0.065,  # 65nm pixels
+    dz=0.2,     # 200nm z-steps
+    NA=1.4,     # Numerical aperture
+    wvl=0.52,   # 520nm emission
+)
+print(f"Recommended PSF size: {xy_size}×{xy_size}×{z_size}")
+
+# Or auto-generate PSF for your image
+image = ...  # Your image array
+psf = dwpy.auto_generate_psf_gl(
+    image,
+    dxy=0.065, dz=0.2,
+    NA=1.4, ni=1.515, ns=1.33, wvl=0.52
+)
+# PSF is automatically sized based on optical parameters
+```
+
+### Understanding Tiled Deconvolution
+
+For large images that don't fit in memory:
+
+```python
+import dwpy
+
+# Learn how PSF works with tiled deconvolution
+dwpy.explain_tiled_deconvolution()
+
+# Use tiled deconvolution
+cfg = dwpy.DeconvolutionConfig(
+    n_iter=20,
+    tile_max_size=512,   # Process in 512×512 tiles
+    tile_overlap=100,    # Overlap tiles by 100 pixels
+)
+result = dwpy.deconvolve_tiled(large_image, psf, cfg=cfg)
+```
+
+**Key points about tiling:**
+- PSF size is independent of tile size
+- Same PSF is used for all tiles
+- Tiles must overlap by at least PSF_size//2
+- PSF can be larger than individual tiles
+
 ## Examples
 
 See the `demo/` directory for complete examples:
