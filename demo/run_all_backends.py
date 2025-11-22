@@ -75,8 +75,8 @@ def load_demo():
     psf_xyz = psf_module.generate_psf_gl(
         dxy=dxy,
         dz=dz,
-        xy_size=51,        # Larger PSF for better coverage
-        z_size=51,
+        xy_size=181,       # Match existing PSF size (181x181x79)
+        z_size=79,
         NA=1.4,            # High NA oil immersion
         ni=1.515,          # Oil immersion medium
         ns=1.38,           # Cellular refractive index
