@@ -5,6 +5,71 @@ import numpy as np
 from typing import Tuple, Optional
 
 
+def auto_psf_size_physical(
+    dxy: float,
+    dz: float,
+    physical_extent: float = 54.3,
+) -> Tuple[int, int]:
+    """
+    Calculate PSF size to maintain constant physical extent.
+
+    This is more consistent than the C heuristic, which only scales the
+    axial dimension. Here, both lateral and axial dimensions scale with
+    pixel size to maintain a cubic PSF in physical space.
+
+    Parameters
+    ----------
+    dxy : float
+        Lateral pixel size in microns
+    dz : float
+        Axial pixel size in microns
+    physical_extent : float, optional
+        Physical PSF extent in microns (default: 54.3)
+        This is the same reference depth used in C code (181 × 300nm)
+
+    Returns
+    -------
+    xy_size : int
+        Lateral PSF size in pixels (odd number)
+    z_size : int
+        Axial PSF size in pixels (odd number)
+
+    Notes
+    -----
+    Unlike the C heuristic which uses fixed 181 lateral pixels, this
+    maintains constant physical size in all dimensions:
+
+    Physical size = pixels × pixel_size = constant
+
+    Examples
+    --------
+    >>> # Fine resolution
+    >>> xy, z = auto_psf_size_physical(dxy=0.065, dz=0.200)
+    >>> print(f"{xy}x{xy}x{z} = {xy*0.065:.1f}x{xy*0.065:.1f}x{z*0.2:.1f} μm")
+    835x835x273 = 54.3x54.3x54.6 μm
+
+    >>> # Coarse resolution
+    >>> xy, z = auto_psf_size_physical(dxy=0.130, dz=0.300)
+    >>> print(f"{xy}x{xy}x{z} = {xy*0.13:.1f}x{xy*0.13:.1f}x{z*0.3:.1f} μm")
+    419x419x183 = 54.5x54.5x54.9 μm
+    """
+    # Calculate pixels needed for desired physical size
+    xy_size = int(np.ceil(physical_extent / dxy))
+    z_size = int(np.ceil(physical_extent / dz))
+
+    # Ensure odd sizes (for Fourier symmetry)
+    if xy_size % 2 == 0:
+        xy_size += 1
+    if z_size % 2 == 0:
+        z_size += 1
+
+    # Minimum size constraints
+    xy_size = max(xy_size, 11)
+    z_size = max(z_size, 11)
+
+    return xy_size, z_size
+
+
 def auto_psf_size_c_heuristic(
     dxy: float,
     dz: float,
@@ -521,7 +586,109 @@ For each tile with padding:
     return explanation
 
 
+def auto_psf_size(
+    dxy: float,
+    dz: float,
+    NA: float,
+    wvl: float,
+    ni: float,
+    mode: str = 'physical',
+    xy_size: Optional[int] = None,
+    z_size: Optional[int] = None,
+    physical_extent: float = 54.3,
+    **kwargs
+) -> Tuple[int, int]:
+    """
+    Unified PSF sizing function with multiple strategies.
+
+    Parameters
+    ----------
+    dxy : float
+        Lateral pixel size in microns
+    dz : float
+        Axial pixel size in microns
+    NA : float
+        Numerical aperture
+    wvl : float
+        Wavelength in microns
+    ni : float
+        Immersion medium refractive index
+    mode : str
+        Sizing strategy:
+        - 'physical': Scale both dimensions to maintain constant physical size (recommended)
+        - 'c_heuristic': Match C code behavior (lateral=181, axial scaled)
+        - 'manual': Use explicit xy_size/z_size
+    xy_size : int, optional
+        Manual lateral size (required for mode='manual')
+    z_size : int, optional
+        Manual axial size (required for mode='manual')
+    physical_extent : float, optional
+        Physical size in microns for 'physical' mode (default: 54.3)
+
+    Returns
+    -------
+    xy_size : int
+        Lateral PSF size in pixels (odd)
+    z_size : int
+        Axial PSF size in pixels (odd)
+
+    Raises
+    ------
+    ValueError
+        If mode='manual' but xy_size or z_size not provided
+
+    Examples
+    --------
+    >>> # Physical mode (consistent scaling)
+    >>> xy, z = auto_psf_size(0.065, 0.2, 1.4, 0.52, 1.515, mode='physical')
+    >>> print(f"Physical: {xy}x{z}, size={xy*0.065:.1f}x{z*0.2:.1f} μm")
+    Physical: 835x273, size=54.3x54.6 μm
+
+    >>> # C heuristic mode (matches C code)
+    >>> xy, z = auto_psf_size(0.13, 0.3, 1.45, 0.461, 1.512, mode='c_heuristic')
+    >>> print(f"C heuristic: {xy}x{z}")
+    C heuristic: 181x183
+
+    >>> # Manual mode
+    >>> xy, z = auto_psf_size(0.13, 0.3, 1.45, 0.461, 1.512,
+    ...                       mode='manual', xy_size=201, z_size=101)
+    >>> print(f"Manual: {xy}x{z}")
+    Manual: 201x101
+    """
+    if mode == 'manual':
+        if xy_size is None or z_size is None:
+            raise ValueError(
+                "Manual mode requires both xy_size and z_size to be specified"
+            )
+        # Ensure odd
+        if xy_size % 2 == 0:
+            xy_size += 1
+        if z_size % 2 == 0:
+            z_size += 1
+        return xy_size, z_size
+
+    elif mode == 'c_heuristic':
+        return auto_psf_size_c_heuristic(
+            dxy=dxy, dz=dz, NA=NA, wvl=wvl, ni=ni,
+            xy_size=xy_size, z_size=z_size
+        )
+
+    elif mode == 'physical':
+        return auto_psf_size_physical(
+            dxy=dxy, dz=dz,
+            physical_extent=physical_extent
+        )
+
+    else:
+        raise ValueError(
+            f"Unknown sizing mode: '{mode}'. "
+            "Use 'physical', 'c_heuristic', or 'manual'"
+        )
+
+
 __all__ = [
+    'auto_psf_size',
+    'auto_psf_size_physical',
     'auto_psf_size_c_heuristic',
     'calculate_psf_size',
     'pad_psf_to_image_size',

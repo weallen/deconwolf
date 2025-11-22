@@ -20,8 +20,10 @@ imaging:
 
 psf:
   model: "gibson-lanni"  # Use GL for RI mismatch (oil→cells)
-  xy_size: null  # Auto-calculate (default: 181)
-  z_size: null   # Auto-calculate using C heuristic
+  sizing_mode: "c_heuristic"  # Match C code behavior for compatibility
+  physical_extent: 54.3  # μm (reference depth from C code)
+  xy_size: null  # Auto-calculate based on sizing_mode
+  z_size: null   # Auto-calculate based on sizing_mode
   # Design parameters (null = match actual)
   ni0: null  # Design immersion RI
   tg0: null  # Design coverslip thickness

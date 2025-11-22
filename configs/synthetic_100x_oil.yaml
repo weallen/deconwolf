@@ -19,8 +19,10 @@ imaging:
 
 psf:
   model: "gibson-lanni"  # Use GL for RI mismatch
+  sizing_mode: "physical"  # Scale both dimensions consistently
+  physical_extent: 54.3  # μm
   xy_size: null  # Auto-calculate
-  z_size: null   # Auto-calculate using C heuristic
+  z_size: null   # Auto-calculate
 
 deconvolution:
   method: "shb"

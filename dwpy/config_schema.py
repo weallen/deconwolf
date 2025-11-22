@@ -42,8 +42,10 @@ class PSFConfig:
     """PSF generation configuration."""
 
     model: Literal["auto", "bw", "born-wolf", "gl", "gibson-lanni"] = "auto"
-    xy_size: Optional[int] = None  # None = auto-calculate (C heuristic)
-    z_size: Optional[int] = None  # None = auto-calculate (C heuristic)
+    sizing_mode: Literal["physical", "c_heuristic", "manual"] = "physical"
+    physical_extent: float = 54.3  # μm (for 'physical' mode)
+    xy_size: Optional[int] = None  # For 'manual' mode or override
+    z_size: Optional[int] = None  # For 'manual' mode or override
     # Override parameters for GL model
     ni0: Optional[float] = None  # Design immersion RI
     tg0: Optional[float] = None  # Design coverslip thickness

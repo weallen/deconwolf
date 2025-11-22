@@ -23,6 +23,8 @@ from .dw_auto import (
 # PSF generation
 from .psf import generate_psf_bw, generate_psf_gl
 from .psf_utils import (
+    auto_psf_size,
+    auto_psf_size_physical,
     auto_psf_size_c_heuristic,
     calculate_psf_size,
     pad_psf_to_image_size,
@@ -68,6 +70,8 @@ __all__ = [
     "generate_psf_bw",
     "generate_psf_gl",
     # PSF utilities
+    "auto_psf_size",
+    "auto_psf_size_physical",
     "auto_psf_size_c_heuristic",
     "calculate_psf_size",
     "pad_psf_to_image_size",

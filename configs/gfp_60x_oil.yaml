@@ -19,8 +19,10 @@ imaging:
 
 psf:
   model: "gibson-lanni"  # RI mismatch (oil→cells)
-  xy_size: null  # Auto: 181
-  z_size: null   # Auto from C heuristic
+  sizing_mode: "physical"  # Recommended: scales with resolution
+  physical_extent: 54.3  # μm
+  xy_size: null  # Auto-calculate
+  z_size: null   # Auto-calculate
 
 deconvolution:
   method: "shb"

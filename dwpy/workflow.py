@@ -11,7 +11,7 @@ from typing import Union, Dict, Any, Tuple, Optional
 
 from .config_loader import load_experiment_config
 from .config_schema import ExperimentConfig
-from .psf_utils import auto_psf_size_c_heuristic
+from .psf_utils import auto_psf_size
 from .psf import generate_psf_bw, generate_psf_gl
 from .dw_numpy import DeconvolutionConfig
 from .dw_fast import deconvolve_fast
@@ -43,15 +43,17 @@ def generate_psf_from_config(
     >>> print(psf.shape)
     (181, 181, 183)
     """
-    # Calculate PSF size using C heuristic
-    xy_size, z_size = auto_psf_size_c_heuristic(
+    # Calculate PSF size using configured strategy
+    xy_size, z_size = auto_psf_size(
         dxy=config.imaging.dxy,
         dz=config.imaging.dz,
         NA=config.microscope.NA,
         wvl=config.imaging.wavelength,
         ni=config.microscope.ni,
-        xy_size=config.psf.xy_size,  # None = auto
+        mode=config.psf.sizing_mode,
+        xy_size=config.psf.xy_size,  # None for auto modes
         z_size=config.psf.z_size,
+        physical_extent=config.psf.physical_extent,
     )
 
     # Auto-select PSF model if needed
