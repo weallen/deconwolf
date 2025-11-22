@@ -91,9 +91,10 @@ def main():
     print("=" * 70)
 
     # Common PSF parameters for synthetic dataset
+    # Note: Dataset appears to use 100x/1.4NA oil immersion
     NA = 1.4
     wvl = 0.52  # 520nm (green)
-    M_mag = 60
+    M_mag = 100  # 100x magnification
 
     print(f"Image dimensions: {M}×{N}×{P}")
     print(f"Generating PSFs to match (auto-sized then padded)...")
