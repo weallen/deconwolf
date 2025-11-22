@@ -92,44 +92,47 @@ def main():
         psf_supplied = psf_supplied / psf_supplied.sum()
         print(f"  Supplied PSF: {psf_supplied.shape} (XYZ)")
 
-    # DAPI imaging parameters
-    # 60x/1.4NA oil immersion, DAPI emission ~466nm
-    dxy = 0.065  # 65nm lateral pixels
-    dz = 0.200   # 200nm z-steps
+    # DAPI imaging parameters - FROM MAKEFILE
+    # makefile uses: --resxy 130 --resz 300 --lambda 461 --NA 1.45 --ni 1.512
+    dxy = 0.130  # 130nm lateral pixels (from makefile)
+    dz = 0.300   # 300nm z-steps (from makefile)
 
-    print(f"  Voxel size: {dxy}×{dxy}×{dz} μm")
+    print(f"  Voxel size: {dxy}×{dxy}×{dz} μm (from makefile)")
 
     # Generate PSFs
     print("\n" + "=" * 70)
     print("GENERATING PSFs")
     print("=" * 70)
 
-    # Common PSF parameters for DAPI
-    NA = 1.4
-    wvl = 0.466  # DAPI emission peak (466nm, blue)
+    # Common PSF parameters for DAPI - FROM MAKEFILE
+    NA = 1.45      # From makefile
+    ni = 1.512     # From makefile (immersion RI)
+    wvl = 0.461    # From makefile (461nm, DAPI emission)
     M_mag = 60
 
     # Generate PSFs with size matching supplied PSF (181×181×79)
     # Note: This is LARGER than the image (101×201×40) which is correct!
     print(f"\nGenerating PSFs (181×181×79 to match supplied PSF size)...")
 
-    # 1. Gibson-Lanni PSF
+    # 1. Gibson-Lanni PSF - MATCHING MAKEFILE PARAMETERS
     print("\n1. Gibson-Lanni PSF (oil→cells)")
+    print(f"   Parameters: NA={NA}, ni={ni}, wvl={wvl*1000:.0f}nm, {dxy*1000:.0f}nm/{dz*1000:.0f}nm")
     psf_gl = dwpy.generate_psf_gl(
         dxy=dxy, dz=dz,
         xy_size=181, z_size=79,  # Match supplied PSF dimensions
-        NA=NA, ni=1.515, ns=1.38, wvl=wvl, M=M_mag,
-        ti0=150.0, tg=170.0, ng=1.515
+        NA=NA, ni=ni, ns=1.38, wvl=wvl, M=M_mag,
+        ti0=150.0, tg=170.0, ng=ni  # Use same RI for coverslip
     )
     print(f"   Generated: {psf_gl.shape}, sum={psf_gl.sum():.6f}")
     tf.imwrite(output_dir / "PSF_GL.tif", np.transpose(psf_gl, (2, 1, 0)))
 
-    # 2. Born-Wolf PSF
+    # 2. Born-Wolf PSF - MATCHING MAKEFILE PARAMETERS
     print("\n2. Born-Wolf PSF (reference)")
+    print(f"   Parameters: NA={NA}, ni={ni}, wvl={wvl*1000:.0f}nm, {dxy*1000:.0f}nm/{dz*1000:.0f}nm")
     psf_bw = dwpy.generate_psf_bw(
         dxy=dxy, dz=dz,
         xy_size=181, z_size=79,  # Match supplied PSF dimensions
-        NA=NA, ni=1.515, wvl=wvl
+        NA=NA, ni=ni, wvl=wvl
     )
     print(f"   Generated: {psf_bw.shape}, sum={psf_bw.sum():.6f}")
     tf.imwrite(output_dir / "PSF_BW.tif", np.transpose(psf_bw, (2, 1, 0)))
