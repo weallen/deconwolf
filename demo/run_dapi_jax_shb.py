@@ -137,7 +137,7 @@ def main():
 
     # Configuration for DAPI (match C defaults)
     cfg = dwpy.DeconvolutionConfig(
-        n_iter=50,
+        n_iter=20,
         border_quality=2,
         positivity=True,
         metric="idiv",
