@@ -98,31 +98,32 @@ def main():
     M_mag = 100  # 100x magnification
 
     print(f"Image dimensions: {M}×{N}×{P}")
-    print(f"Generating PSFs to match image size...")
+    print(f"Generating PSFs to match supplied PSF size ({psf_supplied.shape})...")
 
     # 0. Use supplied PSF from dataset
     print("\n0. Supplied PSF (from dataset)")
     psf_supplied_norm = psf_supplied / psf_supplied.sum()
     print(f"   Loaded: {psf_supplied.shape}, sum={psf_supplied_norm.sum():.6f}")
 
-    # 1. Gibson-Lanni PSF (padded to image size)
+    # Get supplied PSF dimensions to match
+    psf_M, psf_N, psf_P = psf_supplied.shape
+
+    # 1. Gibson-Lanni PSF (match supplied PSF size)
     print("\n1. Gibson-Lanni PSF (oil→cells)")
-    psf_gl = dwpy.auto_generate_psf_gl(
-        im_xyz,
+    psf_gl = dwpy.generate_psf_gl(
         dxy=dxy, dz=dz,
-        NA=NA, ni=1.515, ns=1.38, wvl=wvl, M=M_mag,
-        match_image_size=True  # Match image dimensions
+        xy_size=psf_M, z_size=psf_P,  # Match supplied PSF dimensions
+        NA=NA, ni=1.515, ns=1.38, wvl=wvl, M=M_mag
     )
     print(f"   Generated: {psf_gl.shape}, sum={psf_gl.sum():.6f}")
     tf.imwrite(output_dir / "PSF_GL.tif", np.transpose(psf_gl, (2, 1, 0)))
 
-    # 2. Born-Wolf PSF (padded to image size)
+    # 2. Born-Wolf PSF (match supplied PSF size)
     print("\n2. Born-Wolf PSF (reference)")
-    psf_bw = dwpy.auto_generate_psf_bw(
-        im_xyz,
+    psf_bw = dwpy.generate_psf_bw(
         dxy=dxy, dz=dz,
-        NA=NA, ni=1.515, wvl=wvl,
-        match_image_size=True  # Match image dimensions
+        xy_size=psf_M, z_size=psf_P,  # Match supplied PSF dimensions
+        NA=NA, ni=1.515, wvl=wvl
     )
     print(f"   Generated: {psf_bw.shape}, sum={psf_bw.sum():.6f}")
     tf.imwrite(output_dir / "PSF_BW.tif", np.transpose(psf_bw, (2, 1, 0)))
