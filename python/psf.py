@@ -65,8 +65,8 @@ class BornWolfPSF:
         real_part = bessel * np.cos(phase) * rho
         imag_part = -bessel * np.sin(phase) * rho
 
-        real_val = np.trapezoid(real_part, rho)
-        imag_val = np.trapezoid(imag_part, rho)
+        real_val = np.trapz(real_part, rho)
+        imag_val = np.trapz(imag_part, rho)
         return float(real_val * real_val + imag_val * imag_val)
 
     def _radial_profile(self, radii_pix: np.ndarray, dxy: float, defocus_um: float) -> np.ndarray:
