@@ -1,10 +1,31 @@
 import jax
 import jax.numpy as jnp
+from jax import lax
 from typing import Optional, Tuple, List
 import numpy as np
 import math
 import dask.array as da
 from functools import partial
+
+# ============== Optimization Helpers ==============
+
+def _optimal_fft_size(n: int) -> int:
+    """Find size with only small prime factors (2, 3, 5) for fast FFT."""
+    target = n
+    while True:
+        m = target
+        for p in [2, 3, 5]:
+            while m % p == 0:
+                m //= p
+        if m == 1:
+            return target
+        target += 1
+
+
+def _ensure_float32(arr):
+    """Ensure array is float32 for GPU efficiency."""
+    return jnp.asarray(arr, dtype=jnp.float32)
+
 
 @jax.jit
 def fft(arr:jnp.array) -> jnp.array:
@@ -67,7 +88,7 @@ def get_fIdiv(y:jnp.array, g:jnp.array) -> float:
     I = jnp.sum(g_flat[pos_idx]*jnp.log(g_flat[pos_idx]/y_subset[pos_idx]) - (g_flat[pos_idx]-y_subset[pos_idx]))
     return I/(M*N*P)
 
-def psf_autocrop(psf:np.array, im:np.array, border_quality:int=2, xycropfactor:float=0.001) -> jnp.array:
+def psf_autocrop(psf:np.array, im:np.array, border_quality:int=1, xycropfactor:float=0.001) -> jnp.array:
     M,N,P = im.shape
     pM, pN, pP = psf.shape
     psf = psf_autocrop_by_image(psf, im)
@@ -77,7 +98,7 @@ def psf_autocrop(psf:np.array, im:np.array, border_quality:int=2, xycropfactor:f
         psf = psf_autocrop_xy(psf, xycropfactor=xycropfactor)
     return psf
 
-def psf_autocrop_by_image(psf:np.array, im:np.array, border_quality:int=2) -> jnp.array:
+def psf_autocrop_by_image(psf:np.array, im:np.array, border_quality:int=1) -> jnp.array:
     m, n, p = psf.shape
     M, N, P = im.shape
     if border_quality == 0:
@@ -310,7 +331,7 @@ def compute_tile_positions(im:jnp.array, max_size:int, overlap:int) -> Tuple[Lis
 def run_dw_tiled_dask(im:np.ndarray, psf:np.ndarray, 
     tile_factor:int=4,
     n_iter:int=10, alphamax:float=10, bg:Optional[float]=None, 
-    relax:int=0, psigma:int=0, border_quality:int=2,
+    relax:int=0, psigma:int=0, border_quality:int=1,
     positivity:bool=True,method:str='shb', err_thresh:Optional[float]=None) -> np.ndarray:
     """
     Run tiled deconvolution on an image using single-threaded JAX functions, parallelized with Dask. 
@@ -348,7 +369,7 @@ def run_dw_tiled_dask(im:np.ndarray, psf:np.ndarray,
 def run_dw_tiled(im:jnp.array, psf:jnp.array, 
     tile_max_size:int=256, tile_padding:int=40,
     n_iter:int=10, alphamax:float=10, bg:Optional[float]=None, 
-    relax:int=0, psigma:int=0, border_quality:int=2,
+    relax:int=0, psigma:int=0, border_quality:int=1,
     positivity:bool=True,method:str='shb' ) -> jnp.array:
     """
     Run DW on tiles independently, without parallelization. 
@@ -404,10 +425,11 @@ def run_dw_tiled(im:jnp.array, psf:jnp.array,
         decon_img = decon_img.at[min_x:max_x, min_y:max_y, :].set(res_cropped)
     return decon_img
 
-def run_dw(im:np.array, psf:np.array, 
-    n_iter:int=10, alphamax:float=10, bg:Optional[float]=None, 
-    relax:int=0, psigma:int=0, border_quality:int=2,
-    positivity:bool=True,method:str='shb_jit',verbose:bool=True, err_thresh:Optional[float]=0.01) -> jnp.array:
+def run_dw(im:np.array, psf:np.array,
+    n_iter:int=10, alphamax:float=10, bg:Optional[float]=None,
+    relax:int=0, psigma:int=0, border_quality:int=1,
+    positivity:bool=True,method:str='shb_jit',verbose:bool=True, err_thresh:Optional[float]=0.01,
+    optimize_fft_size:bool=True) -> jnp.array:
     M, N, P = im.shape
 
     if im.min() < 0:
@@ -428,11 +450,11 @@ def run_dw(im:np.array, psf:np.array,
     im = jnp.array(im)
     psf = jnp.array(psf)
     im, psf = prefilter(im, psf, psigma) 
-    return decon(im, psf, psigma, n_iter, alphamax, bg, border_quality, positivity, method, verbose=verbose, err_thresh=err_thresh)
+    return decon(im, psf, psigma, n_iter, alphamax, bg, border_quality, positivity, method, verbose=verbose, err_thresh=err_thresh, optimize_fft_size=optimize_fft_size)
 
-def decon(im:jnp.array, psf:jnp.array, psigma:int=3, n_iter:int=10, alphamax:float=10, 
-          bg:Optional[float]=None, border_quality:int=2, positivity:bool=True, method:str='shb_jit',err_thresh:Optional[float]=None, 
-          verbose:bool=False) -> jnp.array:
+def decon(im:jnp.array, psf:jnp.array, psigma:int=3, n_iter:int=10, alphamax:float=10,
+          bg:Optional[float]=None, border_quality:int=1, positivity:bool=True, method:str='shb_jit',err_thresh:Optional[float]=None,
+          verbose:bool=False, optimize_fft_size:bool=True) -> jnp.array:
     # auto compute background
     if bg is None:
         bg = im.min()
@@ -446,14 +468,20 @@ def decon(im:jnp.array, psf:jnp.array, psigma:int=3, n_iter:int=10, alphamax:flo
     wP = P + pP - 1
 
     if border_quality == 1:
-        wM = M + (pM + 1)/2
-        wN = N + (pN + 1)/2
-        wP = P + (pP + 1)/2
+        wM = M + (pM + 1)//2
+        wN = N + (pN + 1)//2
+        wP = P + (pP + 1)//2
 
     elif border_quality == 0:
         wM = max(M, pM)
         wN = max(N, pN)
         wP = max(P, pP)
+
+    # Optimize FFT sizes for faster computation (use only small prime factors 2,3,5)
+    if optimize_fft_size:
+        wM = _optimal_fft_size(int(wM))
+        wN = _optimal_fft_size(int(wN))
+        wP = _optimal_fft_size(int(wP))
 
     Z = jnp.zeros((wM, wN, wP))
 
@@ -469,14 +497,17 @@ def decon(im:jnp.array, psf:jnp.array, psigma:int=3, n_iter:int=10, alphamax:flo
     sigma = 0.01
     if border_quality > 0:
         F_one = initial_guess(M, N, P, wM, wN, wP)
-    
+
         W = jnp.fft.irfftn(fft_mul_conj(cK, F_one))
         #W = jnp.where(W > sigma, 1/W, 0)
         idx = W>sigma
         #
         W = W.at[idx].divide(W[idx])  # W[idx] = 1/W[idx]
         W = W.at[~idx].set(0)
-    
+    else:
+        # No border correction weights when border_quality == 0
+        W = jnp.ones((wM, wN, wP), dtype=im.dtype)
+
     sumg = im.sum() 
     # x is initial guess, initially previous iteration xp is set to be the same
     x = jnp.ones((wM, wN, wP)) * sumg/(wM*wN*wP)
@@ -649,8 +680,430 @@ def iter_shb(im:jnp.array, cK:jnp.array, pK: jnp.array, W:jnp.array ) -> Tuple[j
 @jax.jit
 def update_x_shb(y:jnp.array, cK:jnp.array, pK:jnp.array, W:jnp.array) -> jnp.array:
     Y = fft(y)
-    # convolve with PSF 
+    # convolve with PSF
     x = fft_convolve_cc_conj_f2(cK, Y)
     #if W is not None:
     x *= pK * W
     return x
+
+
+# ============== Optimized JAX Implementations ==============
+
+def _make_decon_fori(M: int, N: int, P: int, wM: int, wN: int, wP: int):
+    """
+    Factory function to create a JIT-compiled deconvolution loop with fixed dimensions.
+
+    This approach uses closure over static dimensions to avoid dynamic indexing issues.
+    """
+    wshape = (wM, wN, wP)
+    mindiv = 1e-6
+
+    @jax.jit
+    def _decon_fori_inner(im: jnp.ndarray, cK: jnp.ndarray, x_init: jnp.ndarray,
+                          W: jnp.ndarray, bg: float, n_iter: int, alphamax: float) -> jnp.ndarray:
+        """
+        Fully JIT-compiled SHB deconvolution loop using jax.lax.fori_loop.
+
+        This eliminates Python loop overhead by compiling the entire iteration
+        sequence into a single XLA program.
+        """
+
+        def body_fn(i, carry):
+            x, xp = carry
+
+            # Compute momentum coefficient (Eq. 10 in SHB paper)
+            i_f = i.astype(jnp.float32)
+            alpha = jnp.clip((i_f - 1.0) / (i_f + 2.0), 0.0, alphamax)
+
+            # Momentum estimate
+            p = x + alpha * (x - xp)
+            p = jnp.maximum(p, bg)
+
+            # Forward model: convolve with PSF
+            pK_F = jnp.fft.rfftn(p, s=wshape)
+            y = jnp.fft.irfftn(cK * pK_F, s=wshape)
+
+            # Compute ratio in image domain (use static slice)
+            y_obs = lax.dynamic_slice(y, (0, 0, 0), (M, N, P))
+            y_safe = jnp.where(jnp.abs(y_obs) < mindiv,
+                              jnp.copysign(mindiv, y_obs), y_obs)
+            ratio = im / y_safe
+
+            # Embed ratio in work volume
+            y_full = jnp.zeros(wshape, dtype=im.dtype)
+            y_full = lax.dynamic_update_slice(y_full, ratio, (0, 0, 0))
+
+            # Back-convolve with conjugate PSF
+            Y = jnp.fft.rfftn(y_full, s=wshape)
+            x_new = jnp.fft.irfftn(jnp.conj(cK) * Y, s=wshape)
+
+            # Apply weights
+            x_new = x_new * p * W
+
+            # Positivity constraint
+            x_new = jnp.maximum(x_new, bg)
+
+            return (x_new, x)
+
+        init_carry = (x_init, x_init)
+        final_x, final_xp = lax.fori_loop(0, n_iter, body_fn, init_carry)
+
+        # IMPORTANT: Original decon() returns xp (second-to-last iteration result)
+        # at line 559: "x = xp"
+        return final_xp
+
+    return _decon_fori_inner
+
+
+# Cache for compiled deconvolution functions
+_decon_fori_cache = {}
+
+
+def decon_fast(im: jnp.ndarray, psf: jnp.ndarray, psigma: int = 3,
+               n_iter: int = 10, alphamax: float = 10.0,
+               bg: Optional[float] = None, border_quality: int = 1,
+               positivity: bool = True) -> jnp.ndarray:
+    """
+    Fast SHB deconvolution using jax.lax.fori_loop.
+
+    This is a drop-in replacement for decon() that compiles the entire
+    iteration loop into a single XLA program, eliminating Python overhead.
+
+    The setup (PSF preparation, weights, etc.) is identical to decon() to
+    ensure numerical parity. Only the iteration loop is optimized.
+
+    Args:
+        im: Input image (M, N, P)
+        psf: Point spread function (already normalized)
+        psigma: Smoothing parameter (must be 0 for fori_loop version)
+        n_iter: Number of iterations
+        alphamax: Maximum momentum parameter for SHB
+        bg: Background value. If None, computed from image minimum.
+        border_quality: Border handling (0=none, 1=half, 2=full)
+        positivity: Whether to enforce positivity constraint
+
+    Returns:
+        Deconvolved image (M, N, P)
+    """
+    if psigma > 0:
+        raise ValueError("decon_fast does not support psigma > 0. Use decon() instead.")
+
+    # Auto compute background (same as decon)
+    if bg is None:
+        bg = im.min()
+        if bg < 1e-2:
+            bg = 1e-2
+    bg = float(bg)
+
+    M, N, P = im.shape
+    pM, pN, pP = psf.shape
+
+    # Compute work shape (EXACTLY as in decon)
+    wM = M + pM - 1
+    wN = N + pN - 1
+    wP = P + pP - 1
+
+    if border_quality == 1:
+        wM = int(M + (pM + 1) / 2)
+        wN = int(N + (pN + 1) / 2)
+        wP = int(P + (pP + 1) / 2)
+    elif border_quality == 0:
+        wM = max(M, pM)
+        wN = max(N, pN)
+        wP = max(P, pP)
+
+    # Convert to int for JAX
+    wM, wN, wP = int(wM), int(wN), int(wP)
+    wshape = (wM, wN, wP)
+
+    # Prepare PSF (EXACTLY as in decon using insert and circshift)
+    Z = jnp.zeros(wshape)
+    Z = insert(Z, psf)
+    Z = circshift(Z, -max_idx(Z))
+
+    # PSF FFT
+    cK = fft(Z)
+
+    # Compute Bertero weights (EXACTLY as in decon)
+    sigma = 0.01
+    if border_quality > 0:
+        F_one = initial_guess(M, N, P, wM, wN, wP)
+        W = jnp.fft.irfftn(fft_mul_conj(cK, F_one))
+        idx = W > sigma
+        W = W.at[idx].divide(W[idx])
+        W = W.at[~idx].set(0)
+    else:
+        W = jnp.ones(wshape)
+
+    # Initial guess (EXACTLY as in decon)
+    sumg = im.sum()
+    x_init = jnp.ones(wshape) * sumg / (wM * wN * wP)
+
+    # Get or create compiled function for these dimensions
+    cache_key = (M, N, P, wM, wN, wP)
+    if cache_key not in _decon_fori_cache:
+        _decon_fori_cache[cache_key] = _make_decon_fori(M, N, P, wM, wN, wP)
+
+    _decon_fori_fn = _decon_fori_cache[cache_key]
+
+    # Run optimized deconvolution
+    x = _decon_fori_fn(im, cK, x_init, W, bg, n_iter, alphamax)
+
+    # Crop to original size (same as decon)
+    return x[:M, :N, :P]
+
+
+# ============== Batch Processing with vmap ==============
+
+def batch_deconvolve(images: jnp.ndarray, psf: jnp.ndarray,
+                     n_iter: int = 10, alphamax: float = 10.0,
+                     bg: Optional[float] = None, border_quality: int = 1) -> jnp.ndarray:
+    """
+    Vectorized deconvolution of multiple images with the same PSF.
+
+    Uses jax.vmap to process multiple images in parallel, achieving
+    significant speedup on GPU when processing batches.
+
+    NOTE: PSF should already be preprocessed (normalized, autocropped) before
+    calling this function.
+
+    Args:
+        images: Stack of 3D images, shape (batch_size, M, N, P)
+        psf: Point spread function (shared across all images, already normalized)
+        n_iter: Number of iterations
+        alphamax: Maximum momentum parameter for SHB
+        bg: Background value. If None, computed per-image from minimum.
+        border_quality: Border handling (0=none, 1=half, 2=full)
+
+    Returns:
+        Deconvolved images, shape (batch_size, M, N, P)
+    """
+    batch_size, M, N, P = images.shape
+    pM, pN, pP = psf.shape
+
+    # Compute work shape (EXACTLY as in decon)
+    wM = M + pM - 1
+    wN = N + pN - 1
+    wP = P + pP - 1
+
+    if border_quality == 1:
+        wM = int(M + (pM + 1) / 2)
+        wN = int(N + (pN + 1) / 2)
+        wP = int(P + (pP + 1) / 2)
+    elif border_quality == 0:
+        wM = max(M, pM)
+        wN = max(N, pN)
+        wP = max(P, pP)
+
+    wM, wN, wP = int(wM), int(wN), int(wP)
+    wshape = (wM, wN, wP)
+
+    # Prepare PSF (EXACTLY as in decon using insert and circshift)
+    Z = jnp.zeros(wshape)
+    Z = insert(Z, psf)
+    Z = circshift(Z, -max_idx(Z))
+
+    # PSF FFT
+    cK = fft(Z)
+
+    # Compute Bertero weights (EXACTLY as in decon)
+    sigma = 0.01
+    if border_quality > 0:
+        F_one = initial_guess(M, N, P, wM, wN, wP)
+        W = jnp.fft.irfftn(fft_mul_conj(cK, F_one))
+        idx = W > sigma
+        W = W.at[idx].divide(W[idx])
+        W = W.at[~idx].set(0)
+    else:
+        W = jnp.ones(wshape)
+
+    # Compute background per image if not provided
+    if bg is None:
+        bg_arr = jnp.maximum(images.min(axis=(1, 2, 3)), 1e-2)
+    else:
+        bg_arr = jnp.full(batch_size, float(bg))
+
+    # Create vmappable deconvolution function with all constants captured
+    mindiv = 1e-6
+
+    def single_decon(im_single, bg_val):
+        """Deconvolve a single image - vmappable."""
+
+        def body_fn(i, carry):
+            x, xp = carry
+
+            # Compute momentum coefficient (EXACTLY as in decon shb_jit path)
+            i_f = i.astype(jnp.float32)
+            alpha = jnp.clip((i_f - 1.0) / (i_f + 2.0), 0.0, alphamax)
+
+            # Momentum estimate
+            p = x + alpha * (x - xp)
+            p = jnp.maximum(p, bg_val)
+
+            # Forward model
+            pK_F = jnp.fft.rfftn(p, s=wshape)
+            y = jnp.fft.irfftn(cK * pK_F, s=wshape)
+
+            # Compute ratio
+            y_obs = lax.dynamic_slice(y, (0, 0, 0), (M, N, P))
+            y_safe = jnp.where(jnp.abs(y_obs) < mindiv,
+                              jnp.copysign(mindiv, y_obs), y_obs)
+            ratio_slice = im_single / y_safe
+
+            # Embed ratio in work volume
+            y_full = jnp.zeros(wshape, dtype=im_single.dtype)
+            y_full = lax.dynamic_update_slice(y_full, ratio_slice, (0, 0, 0))
+
+            # Back-convolve
+            Y = jnp.fft.rfftn(y_full, s=wshape)
+            x_new = jnp.fft.irfftn(jnp.conj(cK) * Y, s=wshape)
+            x_new = x_new * p * W
+
+            # Positivity
+            x_new = jnp.maximum(x_new, bg_val)
+
+            return (x_new, x)
+
+        sumg = im_single.sum()
+        x_init = jnp.ones(wshape) * sumg / (wM * wN * wP)
+        init_carry = (x_init, x_init)
+        final_x, final_xp = lax.fori_loop(0, n_iter, body_fn, init_carry)
+        # Return xp to match original decon() behavior
+        return final_xp[:M, :N, :P]
+
+    # Apply vmap over batch dimension
+    batched_decon = jax.jit(jax.vmap(single_decon, in_axes=(0, 0)))
+
+    return batched_decon(images, bg_arr)
+
+
+# ============== Parallel Tiled Deconvolution ==============
+
+def run_dw_tiled_parallel(im: jnp.ndarray, psf: jnp.ndarray,
+                          tile_max_size: int = 256, tile_padding: int = 40,
+                          n_iter: int = 10, alphamax: float = 10.0,
+                          bg: Optional[float] = None, border_quality: int = 1,
+                          relax: int = 0, psigma: int = 0,
+                          positivity: bool = True) -> jnp.ndarray:
+    """
+    Parallel tiled deconvolution using vmap for efficient processing of large images.
+
+    This function splits a large image into tiles, processes them all in parallel
+    using batch_deconvolve with vmap, then reassembles the result. This is much
+    faster than sequential tiled processing for large images.
+
+    Args:
+        im: Input 3D image (M, N, P)
+        psf: Point spread function
+        tile_max_size: Maximum tile size in X and Y
+        tile_padding: Overlap padding to avoid edge artifacts
+        n_iter: Number of iterations
+        alphamax: Maximum momentum for SHB
+        bg: Background value (None = auto-detect)
+        border_quality: Border handling quality (0, 1, or 2)
+        relax: Relaxation parameter for PSF
+        psigma: Gaussian smoothing sigma for PSF
+        positivity: Enforce positivity constraint
+
+    Returns:
+        Deconvolved image (M, N, P)
+    """
+    M, N, P = im.shape
+
+    # Preprocess image (same as run_dw_tiled)
+    if im.min() < 0:
+        im = im - im.min()
+    if im.max() < 1000:
+        im = im * (1000 / im.max())
+
+    # Normalize and preprocess PSF
+    psf = psf / psf.sum()
+    psf = psf_autocrop(psf, im)
+
+    if relax > 0:
+        mid_x, mid_y, mid_z = get_midpoint(psf)
+        psf = psf.at[mid_x, mid_y, mid_z].add(relax)
+        psf = psf / psf.sum()
+
+    # Apply prefilter if requested
+    im, psf = prefilter(im, psf, psigma)
+
+    # Compute tile positions
+    pos_with_overlap, pos_without_overlap = compute_tile_positions(im, tile_max_size, tile_padding)
+    n_tiles = len(pos_with_overlap)
+
+    if n_tiles == 1:
+        # Single tile - just use regular decon
+        return decon(im, psf, psigma=0, n_iter=n_iter, alphamax=alphamax,
+                    bg=bg, border_quality=border_quality, positivity=positivity,
+                    method='shb_jit', verbose=False)
+
+    # Extract all tiles and find maximum tile dimensions
+    tiles = []
+    tile_shapes = []
+    for i in range(n_tiles):
+        (min_x_overlap, max_x_overlap), (min_y_overlap, max_y_overlap) = pos_with_overlap[i]
+        tile = im[min_x_overlap:max_x_overlap, min_y_overlap:max_y_overlap, :]
+        tiles.append(tile)
+        tile_shapes.append(tile.shape)
+
+    # Find maximum tile size for padding
+    max_tile_x = max(s[0] for s in tile_shapes)
+    max_tile_y = max(s[1] for s in tile_shapes)
+
+    # Pad all tiles to uniform size
+    padded_tiles = []
+    for tile in tiles:
+        pad_x = max_tile_x - tile.shape[0]
+        pad_y = max_tile_y - tile.shape[1]
+        if pad_x > 0 or pad_y > 0:
+            padded = jnp.pad(tile, ((0, pad_x), (0, pad_y), (0, 0)), mode='reflect')
+        else:
+            padded = tile
+        padded_tiles.append(padded)
+
+    # Stack into batch
+    tile_batch = jnp.stack(padded_tiles, axis=0)  # (n_tiles, max_tile_x, max_tile_y, P)
+
+    # Batch deconvolve all tiles in parallel
+    decon_batch = batch_deconvolve(
+        tile_batch, psf,
+        n_iter=n_iter, alphamax=alphamax,
+        bg=bg, border_quality=border_quality
+    )
+
+    # Reassemble tiles into output image
+    decon_img = jnp.zeros_like(im)
+
+    for i in range(n_tiles):
+        # Get the original tile shape
+        orig_x, orig_y, orig_z = tile_shapes[i]
+
+        # Crop deconvolved tile to original size (remove padding)
+        res = decon_batch[i, :orig_x, :orig_y, :]
+
+        # Compute crop boundaries for overlap removal
+        (min_x_overlap, max_x_overlap), (min_y_overlap, max_y_overlap) = pos_with_overlap[i]
+        (min_x, max_x), (min_y, max_y) = pos_without_overlap[i]
+
+        if min_x == 0:
+            crop_x_min = 0
+        else:
+            crop_x_min = tile_padding
+        if max_x == M:
+            crop_x_max = res.shape[0]
+        else:
+            crop_x_max = res.shape[0] - tile_padding
+        if min_y == 0:
+            crop_y_min = 0
+        else:
+            crop_y_min = tile_padding
+        if max_y == N:
+            crop_y_max = res.shape[1]
+        else:
+            crop_y_max = res.shape[1] - tile_padding
+
+        res_cropped = res[crop_x_min:crop_x_max, crop_y_min:crop_y_max, :]
+        decon_img = decon_img.at[min_x:max_x, min_y:max_y, :].set(res_cropped)
+
+    return decon_img

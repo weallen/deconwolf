@@ -260,7 +260,7 @@ class DeconvolutionConfig:
     fftw_threads: int = 1  # used by fftw backend
     jax_platform: Optional[str] = None  # 'cpu'|'gpu' etc, passed to jax if set
     jax_num_threads: Optional[int] = None  # hint for JAX CPU threads
-    use_weights: bool = False  # disable Bertero weights by default (parity with JAX)
+    use_weights: bool = True  # Bertero weights for border correction (matches C implementation)
 
 
 def prefilter_im_psf(im: np.ndarray, psf: np.ndarray, psigma: float) -> Tuple[np.ndarray, np.ndarray]:
