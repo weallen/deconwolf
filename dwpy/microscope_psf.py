@@ -353,12 +353,16 @@ class MicroscopePSF:
         a = NA * zd0 / mp["M"]  # Aperture radius at the back focal plane.
         k = 2.0 * numpy.pi / wvl  # Wave number of emitted light.
 
-        OPDs = pz * numpy.sqrt(ns * ns - NA * NA * rho * rho)  # OPD in the sample.
-        OPDi = ti * numpy.sqrt(ni * ni - NA * NA * rho * rho) - ti0 * numpy.sqrt(
-            ni0 * ni0 - NA * NA * rho * rho
+        # Clamp sqrt arguments to >= 0. The _configure() method limits max_rho
+        # to min(all RIs)/NA, which should keep these non-negative, but float
+        # precision at the boundary can produce small negative values.
+        NA2rho2 = NA * NA * rho * rho
+        OPDs = pz * numpy.sqrt(numpy.maximum(0.0, ns * ns - NA2rho2))
+        OPDi = ti * numpy.sqrt(numpy.maximum(0.0, ni * ni - NA2rho2)) - ti0 * numpy.sqrt(
+            numpy.maximum(0.0, ni0 * ni0 - NA2rho2)
         )  # OPD in the immersion medium.
-        OPDg = tg * numpy.sqrt(ng * ng - NA * NA * rho * rho) - tg0 * numpy.sqrt(
-            ng0 * ng0 - NA * NA * rho * rho
+        OPDg = tg * numpy.sqrt(numpy.maximum(0.0, ng * ng - NA2rho2)) - tg0 * numpy.sqrt(
+            numpy.maximum(0.0, ng0 * ng0 - NA2rho2)
         )  # OPD in the coverslip.
         OPDt = a * a * (zd0 - zd) * rho * rho / (2.0 * zd0 * zd)  # OPD in camera position.
 
@@ -376,7 +380,9 @@ class MicroscopePSF:
         # Create XYZ PSF by interpolation.
         PSF_xyz = numpy.zeros((PSF_rz.shape[0], xy_size, xy_size))
         for i in range(PSF_rz.shape[0]):
-            psf_rz_interp = scipy.interpolate.interp1d(rv, PSF_rz[i, :])
+            psf_rz_interp = scipy.interpolate.interp1d(
+                rv, PSF_rz[i, :], bounds_error=False, fill_value=0.0
+            )
             PSF_xyz[i, :, :] = psf_rz_interp(r_pixel.ravel()).reshape(xy_size, xy_size)
 
         return PSF_xyz

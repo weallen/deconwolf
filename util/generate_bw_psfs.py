@@ -25,7 +25,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 # Load python/psf.py directly to avoid optional deps pulled in by python/__init__.py
-PSF_PATH = ROOT / "python" / "psf.py"
+PSF_PATH = ROOT / "dwpy" / "psf.py"
 spec = importlib.util.spec_from_file_location("psf", PSF_PATH)
 psf_mod = importlib.util.module_from_spec(spec)
 assert spec and spec.loader

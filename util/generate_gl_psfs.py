@@ -21,7 +21,7 @@ import tifffile
 
 # Load microscope_psf without triggering package __init__ (avoids optional deps)
 ROOT = Path(__file__).resolve().parents[1]
-MSPF_PATH = ROOT / "python" / "microscope_psf.py"
+MSPF_PATH = ROOT / "dwpy" / "microscope_psf.py"
 spec = importlib.util.spec_from_file_location("microscope_psf", MSPF_PATH)
 ms_mod = importlib.util.module_from_spec(spec)
 assert spec and spec.loader
@@ -41,7 +41,7 @@ def generate_gl_psf(spec: ObjectiveSpec) -> np.ndarray:
     mp = MicroscopePSF()
     mp.parameters["NA"] = spec["NA"]
     mp.parameters["ni"] = spec["ni"]
-    mp.parameters["ns"] = spec["ni"]
+    mp.parameters["ns"] = spec.get("ns", 1.33)  # specimen RI (aqueous)
 
     z_size = int(spec["z_size"])
     pz = (np.arange(z_size) - (z_size - 1) / 2.0) * spec["dz"]

@@ -248,6 +248,7 @@ def calculate_psf_size(
     dz: float,
     NA: float,
     wvl: float,
+    ni: float = 1.515,
     lateral_margin: float = 3.0,
     axial_margin: float = 3.0,
 ) -> Tuple[int, int]:
@@ -267,6 +268,9 @@ def calculate_psf_size(
         Numerical aperture
     wvl : float
         Wavelength in microns
+    ni : float, optional
+        Immersion medium refractive index (default: 1.515 for oil).
+        Used in axial extent formula matching C reference (dw_bwpsf.c).
     lateral_margin : float, optional
         Number of Airy disk radii to include laterally (default: 3.0)
         Higher values capture more of the PSF tail but increase computation
@@ -286,10 +290,10 @@ def calculate_psf_size(
         r_airy ≈ 0.61 * λ / NA
 
     The axial extent (distance between first minima) is approximately:
-        z_extent ≈ 2 * n * λ / NA²
+        z_extent ≈ 2 * ni * λ / NA²
 
-    For high NA systems, these are approximate and the full PSF may extend
-    beyond these values. The margin parameters control how much to capture.
+    This matches the C reference (dw_bwpsf.c) which uses ni explicitly.
+    The margin parameters control how much of the PSF tails to capture.
 
     Examples
     --------
@@ -311,16 +315,10 @@ def calculate_psf_size(
     # Airy disk radius (first zero of Bessel function)
     r_airy = 0.61 * wvl / NA  # microns
 
-    # Axial extent (simplified formula, assumes immersion RI ≈ NA for high NA)
-    # More accurate: z_extent = 2 * n * wvl / NA^2, but n ≈ NA/sin(asin(NA/n))
-    # For high NA oil (NA=1.4, n=1.515): z_extent ≈ 2*1.515*λ/1.4² ≈ 1.55*λ
-    # Simplified: use 2*wvl/NA for lower NA, adjust for high NA
-    if NA > 1.0:
-        # High NA: use refractive index correction
-        z_extent = 2.0 * 1.5 * wvl / (NA ** 2)
-    else:
-        # Lower NA: simplified formula
-        z_extent = 2.0 * wvl / (NA ** 2)
+    # Axial FWHM from C reference (dw_bwpsf.c:81):
+    #   fwhm_z = 2 * 2.783115 / pi * ni / NA^2 * lambda
+    # We use the same ni-dependent formula for the axial extent.
+    z_extent = 2.0 * ni * wvl / (NA ** 2)
 
     # Calculate PSF physical size with margins
     psf_lateral_size = 2 * lateral_margin * r_airy  # microns (diameter)
@@ -400,7 +398,7 @@ def auto_generate_psf_bw(
     # Calculate appropriate PSF size
     size_kwargs = {k: v for k, v in kwargs.items()
                    if k in ['lateral_margin', 'axial_margin']}
-    xy_size, z_size = calculate_psf_size(dxy, dz, NA, wvl, **size_kwargs)
+    xy_size, z_size = calculate_psf_size(dxy, dz, NA, wvl, ni=ni, **size_kwargs)
 
     # Generate PSF
     psf_kwargs = {k: v for k, v in kwargs.items()
@@ -479,7 +477,7 @@ def auto_generate_psf_gl(
     # Calculate appropriate PSF size
     size_kwargs = {k: v for k, v in kwargs.items()
                    if k in ['lateral_margin', 'axial_margin']}
-    xy_size, z_size = calculate_psf_size(dxy, dz, NA, wvl, **size_kwargs)
+    xy_size, z_size = calculate_psf_size(dxy, dz, NA, wvl, ni=ni, **size_kwargs)
 
     # Generate PSF
     psf_kwargs = {k: v for k, v in kwargs.items()
