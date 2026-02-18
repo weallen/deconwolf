@@ -34,7 +34,6 @@ def fftw_plan(shape: Tuple[int, int, int], threads: int = 1) -> Tuple[Callable, 
 @lru_cache(maxsize=32)
 def _fftn_cached(key):
     shape, threads = key
-    norm = float(np.prod(shape))
     a = pyfftw.empty_aligned(shape, dtype="float32")
     out = pyfftw.empty_aligned((shape[0], shape[1], shape[2] // 2 + 1), dtype="complex64")
     plan = pyfftw.builders.rfftn(a, s=shape, threads=threads)
@@ -43,7 +42,7 @@ def _fftn_cached(key):
         if s is not None and tuple(s) != tuple(shape):
             raise ValueError(f"fftn shape {s} does not match planned shape {shape}")
         out[:] = plan(x, normalise_idft=False)
-        return (out * norm).copy()
+        return out.copy()
 
     return fftn
 

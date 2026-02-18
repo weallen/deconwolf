@@ -63,7 +63,7 @@ def fft_convolve_real(x: np.ndarray, kernel: np.ndarray, pad_shape: Optional[Tup
     insert_shape = tuple(min(a, b) for a, b in zip(kernel.shape, target_shape))
     slices = tuple(slice(0, s) for s in insert_shape)
     work[slices] = kernel[slices]
-    work = np.roll(work, shift=tuple(-(np.array(work.shape) // 2)), axis=(0, 1, 2))
+    work = np.roll(work, shift=tuple(-(np.array(kernel.shape) // 2)), axis=(0, 1, 2))
     kf = np.fft.rfftn(work, s=target_shape)
     xf = np.fft.rfftn(x, s=target_shape)
     out = np.fft.irfftn(xf * kf, s=target_shape).astype(np.float32)

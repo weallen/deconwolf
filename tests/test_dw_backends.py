@@ -43,7 +43,7 @@ def test_numpy_baseline_and_padded():
     out = deconvolve(im, psf, cfg=cfg)
     cfg_pad = _cfg(pad_fast_fft=True)
     out_pad = deconvolve(im, psf, cfg=cfg_pad)
-    _close(out, out_pad, rtol=5e-3, atol=1e-3)
+    _close(out, out_pad, rtol=1e-4, atol=1e-4)
 
 
 def test_tiled_matches_full():
@@ -60,7 +60,7 @@ def test_numba_backend_matches_numpy():
     cfg = _cfg(n_iter=2)
     out_np = deconvolve_fast(im, psf, backend="numpy", cfg=cfg)
     out_nb = deconvolve_fast(im, psf, backend="numba", cfg=cfg)
-    _close(out_np, out_nb, rtol=5e-3, atol=1e-3)
+    _close(out_np, out_nb, rtol=1e-4, atol=1e-4)
 
 
 def test_fftw_backend_matches_numpy():
@@ -87,7 +87,7 @@ def test_jax_backend_matches_numpy():
 def test_dask_wrapper_matches_numpy():
     pytest.importorskip("dask")
     im, psf = _make_data()
-    cfg = _cfg(n_iter=1)
+    cfg = _cfg(n_iter=2)
     out_np = deconvolve_fast(im, psf, backend="numpy", cfg=cfg)
     out_dask = dask_deconvolve(im, psf, backend="numpy", method="shb", chunk_xy=8, overlap=3, cfg=cfg)
     _close(out_np, out_dask, rtol=5e-3, atol=1e-3)

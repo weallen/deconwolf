@@ -292,6 +292,9 @@ def auto_deconvolve(
 
     # Import and run
     if cfg.tile_max_size is not None:
+        if backend != "numpy":
+            import warnings
+            warnings.warn(f"Tiling uses NumPy backend (requested '{backend}' not supported for tiling)")
         from .dw_numpy import deconvolve_tiled
         return deconvolve_tiled(im, psf, method=method, cfg=cfg)
     elif backend == "numpy":

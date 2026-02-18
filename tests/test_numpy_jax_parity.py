@@ -51,6 +51,8 @@ def test_rl_parity_numpy_vs_jax():
         positivity=True,
         method="rl",
         verbose=False,
+        use_weights=False,
+        optimize_fft_size=False,
     )
     out_j = np.array(out_j)
 
@@ -76,6 +78,8 @@ def test_shb_parity_numpy_vs_jax():
         positivity=True,
         method="shb_jit",
         verbose=False,
+        use_weights=False,
+        optimize_fft_size=False,
     )
     out_j = np.array(out_j)
 
@@ -101,6 +105,8 @@ def test_shb_parity_fast_jax_vs_dw_jax():
         positivity=True,
         method="shb_jit",
         verbose=False,
+        use_weights=False,
+        optimize_fft_size=False,
     )
     out_j = np.array(out_j)
     corr = _corr(out_fast, out_j)

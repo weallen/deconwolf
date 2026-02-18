@@ -114,7 +114,7 @@ def _fft_convolve_real(x, kernel, xp):
     else:
         work[slices] = kernel[slices]
     # center kernel
-    shifts = tuple(-(dim // 2) for dim in work.shape)
+    shifts = tuple(-(dim // 2) for dim in kernel.shape)
     work = xp.roll(work, shift=shifts, axis=(0, 1, 2))
     kf = xp.fft.rfftn(work, s=target_shape)
     xf = xp.fft.rfftn(x, s=target_shape)
@@ -235,7 +235,7 @@ def _get_error(y, g, metric, xp, kernels=None):
 def _get_fmse(y, g, xp, kernels=None):
     M, N, P = g.shape
     sub = y[:M, :N, :P]
-    return float(sub.size and xp.mean((sub - g) ** 2))
+    return float(xp.mean((sub - g) ** 2)) if sub.size > 0 else 0.0
 
 
 def _get_idiv(y, g, xp, kernels=None):
@@ -243,7 +243,7 @@ def _get_idiv(y, g, xp, kernels=None):
     obs = y[:M, :N, :P]
     est = g
     mask = (obs > 0) & (est > 0)
-    if not bool(mask.any()):
+    if not mask.any():
         return 0.0
     if kernels and "idiv" in kernels:
         return kernels["idiv"](obs, est, mask, M * N * P)
@@ -260,7 +260,7 @@ def _prefilter(im, psf, psigma, xp, kernels=None):
     return im_f.astype(xp.float32), psf_f.astype(xp.float32)
 
 
-def _iter_rl_step(im, fft_psf, f, W, bg, metric, xp, kernels=None, scratch=None):
+def _iter_rl_step(im, fft_psf, f, W, bg, metric, xp, kernels=None):
     M, N, P = im.shape
     wshape = f.shape
     F = xp.fft.rfftn(f, s=wshape)
@@ -281,7 +281,7 @@ def _iter_rl_step(im, fft_psf, f, W, bg, metric, xp, kernels=None, scratch=None)
     return x, error
 
 
-def _iter_shb_step(im, cK, pK, W, bg, metric, xp, kernels=None, scratch=None):
+def _iter_shb_step(im, cK, pK, W, bg, metric, xp, kernels=None):
     M, N, P = im.shape
     wshape = pK.shape
     Pk = xp.fft.rfftn(pK, s=wshape)
@@ -372,16 +372,13 @@ def _deconvolve_backend(
     xp_prev = x
     xp_prev2 = xp_prev
     prev_error = np.inf
-    scratch = None
 
     for it in range(cfg.n_iter):
         if method == "shb":
             alpha = max(0.0, min(cfg.alphamax, (it - 1.0) / (it + 2.0)))
             p = x + alpha * (x - xp_prev)
             p = xp.where(p < bg, bg, p)
-            if scratch is None or hasattr(xp, "device_put"):  # JAX case: avoid in-place reuse
-                scratch = xp.zeros_like(x, dtype=xp.float32)
-            xp_curr, err = _iter_shb_step(im_x, cK, p, W, bg, cfg.metric, xp, kernels, scratch)
+            xp_curr, err = _iter_shb_step(im_x, cK, p, W, bg, cfg.metric, xp, kernels)
             xp_prev = x  # Save current x as previous for next momentum calculation
             x = xp_curr  # Update x to new estimate
         else:
@@ -393,9 +390,7 @@ def _deconvolve_backend(
                     beta = min(beta, 1.0 - np.exp(-(it + 1)))
                 current_f = xp_prev + beta * delta
                 current_f = xp.where(current_f < bg, bg, current_f)
-            if scratch is None or hasattr(xp, "device_put"):  # JAX case
-                scratch = xp.zeros_like(x, dtype=xp.float32)
-            xp_curr, err = _iter_rl_step(im_x, cK, current_f, W, bg, cfg.metric, xp, kernels, scratch)
+            xp_curr, err = _iter_rl_step(im_x, cK, current_f, W, bg, cfg.metric, xp, kernels)
             xp_prev2 = xp_prev
             xp_prev = xp_curr
             x = xp_curr
@@ -411,7 +406,10 @@ def _deconvolve_backend(
         if cfg.positivity and float(bg) > 0:
             x = xp.where(x < bg, bg, x)
 
-    out = x[:M, :N, :P]
+    if method == "shb":
+        out = xp_prev[:M, :N, :P]
+    else:
+        out = x[:M, :N, :P]
     # Do NOT subtract offset from output - match C reference behavior
     return to_host(out)
 

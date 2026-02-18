@@ -38,9 +38,8 @@ def fft_mul_conj(A:jnp.array, B:jnp.array) -> jnp.array:
     """
     return jnp.conj(A) * B
 
-@jax.jit
-def fft_convolve_cc_f2(A:jnp.array, B:jnp.array) -> jnp.array:
-    return jnp.fft.irfftn(A*B)
+def fft_convolve_cc_f2(A:jnp.array, B:jnp.array, s=None) -> jnp.array:
+    return jnp.fft.irfftn(A*B, s=s)
 
 @jax.jit
 def fft_convolve_cc(A:jnp.array, B:jnp.array) -> jnp.array:
@@ -49,9 +48,8 @@ def fft_convolve_cc(A:jnp.array, B:jnp.array) -> jnp.array:
     MNP = M*N*P
     return jnp.fft.ifft(C)/MNP
 
-@jax.jit
-def fft_convolve_cc_conj_f2(A:jnp.array, B:jnp.array) -> jnp.array:
-    return jnp.fft.irfftn(jnp.conj(A)*B)
+def fft_convolve_cc_conj_f2(A:jnp.array, B:jnp.array, s=None) -> jnp.array:
+    return jnp.fft.irfftn(jnp.conj(A)*B, s=s)
 
 def get_error(y: jnp.array, g: jnp.array, metric:str='IDIV') -> float:
     if metric == 'MSE':
@@ -75,9 +73,15 @@ def get_fIdiv_jit(y:jnp.array, g:jnp.array) -> float:
     M, N, P = g.shape
     y_subset = y[:M, :N, :P].ravel()
     g_flat = g.ravel()
-    #pos_idx = jnp.argwhere((y_subset > 0)*(g_flat>0)).ravel()
-    #I = jnp.sum(g_flat[pos_idx]*jnp.log(g_flat[pos_idx]/y_subset[pos_idx]) - (g_flat[pos_idx]-y_subset[pos_idx]))
-    I = jnp.sum(g_flat*jnp.log(g_flat/y_subset) - (g_flat-y_subset))
+    safe_y = jnp.where(y_subset > 0, y_subset, 1.0)
+    safe_g = jnp.where(g_flat > 0, g_flat, 0.0)
+    ratio = safe_g / safe_y
+    safe_ratio = jnp.where(ratio > 0, ratio, 1.0)
+    I = jnp.sum(jnp.where(
+        (y_subset > 0) & (g_flat > 0),
+        g_flat * jnp.log(safe_ratio) - (g_flat - y_subset),
+        0.0
+    ))
     return I/(M*N*P)
 
 def get_fIdiv(y:jnp.array, g:jnp.array) -> float:
@@ -113,8 +117,7 @@ def psf_autocrop_by_image(psf:np.array, im:np.array, border_quality:int=1) -> jn
         print("PSF is smaller than image, no cropping")
         return psf
     if (p%2) == 0:
-        # raise error that PSF should have odd number of slices
-        return None
+        raise ValueError(f"PSF Z dimension must be odd, got {p}")
     if (m > mopt) or (n > nopt) or (p > popt):
         # initialize with everything set to bound
         m0 = n0 = p0 = 0
@@ -136,33 +139,16 @@ def psf_autocrop_by_image(psf:np.array, im:np.array, border_quality:int=1) -> jn
 
 def psf_autocrop_xy(psf:np.array, xycropfactor:float=0.001) -> jnp.array:
     m, n, p = psf.shape
-    # find the y-z plane with the largest sum
-    #psf_arr = np.array(psf)
-    sum_over_plane = np.sum(psf, axis=(1,2))
+    sum_over_plane = np.sum(psf, axis=(1, 2))
     maxsum = np.max(sum_over_plane)
-    #maxsum = 0
-    #for xx in range(m):
-    #    sum_val = 0
-    #    for yy in range(n):
-    #        for zz in range(p):
-    #            sum_val += psf_arr[xx, yy, zz]
-    #    maxsum = max(sum_val, maxsum)
-    first = -1
-    sum_val = 0
-
-    while sum_val < xycropfactor * maxsum:
-        first += 1
-        sum_val = 0
-        for yy in range(n):
-            for zz in range(p):
-                sum_val += psf[first, yy, zz]
+    threshold = xycropfactor * maxsum
+    first = np.argmax(sum_over_plane >= threshold)
     if first < 1:
         print(f"No XY crop, shape is {list(psf.shape)}")
         return psf
-    else:
-        psf_cropped = psf[first:m-first, first:n-first, :]
-        print(f"PSF XY crop: {list(psf.shape)} -> {list(psf_cropped.shape)}")
-        return psf_cropped
+    psf_cropped = psf[first:m - first, first:n - first, :]
+    print(f"PSF XY crop: {list(psf.shape)} -> {list(psf_cropped.shape)}")
+    return psf_cropped
 
 def psf_autocrop_center_z(psf:jnp.array) -> jnp.array:
     m, n, p = psf.shape
@@ -217,34 +203,20 @@ def gaussian_kernel_1d(sigma:float) -> jnp.array:
     return K/K.sum()
 
 def gaussian_kernel_3d(sigma_x:float, sigma_y:float, sigma_z:float) -> jnp.array:
-    n_x = 1 # guarantee at least 1
-    while math.erf((n_x+1)/sigma_x) < (1.0-1e-8):
-        n_x += 1
-    n_y = 1
-    while math.erf((n_y+1)/sigma_y) < (1.0-1e-8):
-        n_y += 1
-    n_z = 1
-    while math.erf((n_z+1)/sigma_z) < (1.0-1e-8):
-        n_z += 1
- 
-    N_x = 2*n_x + 1
-    N_y = 2*n_y + 1
-    N_z = 2*n_z + 1
-    mid_x = float((N_x-1)/2)
-    mid_y = float((N_y-1)/2)
-    mid_z = float((N_z-1)/2)
-    x = jnp.arange(0, n_x).float() - mid_x
-    y = jnp.arange(0, n_y).float() - mid_y
-    z = jnp.arange(0, n_z).float() - mid_z
-    x,y,z = jnp.meshgrid([x,y,z])
-    gauss_x = jnp.exp(-0.5 * (x/sigma_x)**2)
-    gauss_y = jnp.exp(-0.5 * (y/sigma_y)**2)
-    gauss_z = jnp.exp(-0.5 * (z/sigma_z)**2)
-    K = gauss_x * gauss_y * gauss_z
-    return K/jnp.sum(K)
+    def _axis_kernel(sigma):
+        radius = max(1, int(np.ceil(3.0 * sigma)))
+        coords = jnp.arange(-radius, radius + 1, dtype=jnp.float32)
+        kern = jnp.exp(-0.5 * (coords / sigma) ** 2)
+        return kern / kern.sum()
+    kx = _axis_kernel(sigma_x)
+    ky = _axis_kernel(sigma_y)
+    kz = _axis_kernel(sigma_z)
+    kernel = jnp.outer(kx, ky).reshape(kx.size, ky.size, 1) * kz.reshape(1, 1, kz.size)
+    return kernel
 
-def max_idx(arr:jnp.array) -> jnp.array:
-    return jnp.argwhere(arr == arr.max()).ravel()
+def max_idx(arr:jnp.array) -> np.ndarray:
+    flat_idx = int(jnp.argmax(arr))
+    return np.array(np.unravel_index(flat_idx, arr.shape))
 
 def circshift(arr:jnp.array,shifts:jnp.array) -> jnp.array:
     # shift each axis in turn
@@ -429,7 +401,7 @@ def run_dw(im:np.array, psf:np.array,
     n_iter:int=10, alphamax:float=10, bg:Optional[float]=None,
     relax:int=0, psigma:int=0, border_quality:int=1,
     positivity:bool=True,method:str='shb_jit',verbose:bool=True, err_thresh:Optional[float]=0.01,
-    optimize_fft_size:bool=True) -> jnp.array:
+    optimize_fft_size:bool=True, use_weights:bool=True) -> jnp.array:
     M, N, P = im.shape
 
     if im.min() < 0:
@@ -450,11 +422,11 @@ def run_dw(im:np.array, psf:np.array,
     im = jnp.array(im)
     psf = jnp.array(psf)
     im, psf = prefilter(im, psf, psigma) 
-    return decon(im, psf, psigma, n_iter, alphamax, bg, border_quality, positivity, method, verbose=verbose, err_thresh=err_thresh, optimize_fft_size=optimize_fft_size)
+    return decon(im, psf, psigma, n_iter, alphamax, bg, border_quality, positivity, method, verbose=verbose, err_thresh=err_thresh, optimize_fft_size=optimize_fft_size, use_weights=use_weights)
 
 def decon(im:jnp.array, psf:jnp.array, psigma:int=3, n_iter:int=10, alphamax:float=10,
           bg:Optional[float]=None, border_quality:int=1, positivity:bool=True, method:str='shb_jit',err_thresh:Optional[float]=None,
-          verbose:bool=False, optimize_fft_size:bool=True) -> jnp.array:
+          verbose:bool=False, optimize_fft_size:bool=True, use_weights:bool=True) -> jnp.array:
     # auto compute background
     if bg is None:
         bg = im.min()
@@ -495,17 +467,14 @@ def decon(im:jnp.array, psf:jnp.array, psigma:int=3, n_iter:int=10, alphamax:flo
     cK = fft(Z)
     del Z
     sigma = 0.01
-    if border_quality > 0:
+    if border_quality > 0 and use_weights:
         F_one = initial_guess(M, N, P, wM, wN, wP)
 
-        W = jnp.fft.irfftn(fft_mul_conj(cK, F_one))
-        #W = jnp.where(W > sigma, 1/W, 0)
+        W = jnp.fft.irfftn(fft_mul_conj(cK, F_one), s=(wM, wN, wP))
         idx = W>sigma
-        #
-        W = W.at[idx].divide(W[idx])  # W[idx] = 1/W[idx]
+        W = W.at[idx].set(1.0 / W[idx])  # W[idx] = 1/W[idx]
         W = W.at[~idx].set(0)
     else:
-        # No border correction weights when border_quality == 0
         W = jnp.ones((wM, wN, wP), dtype=im.dtype)
 
     sumg = im.sum() 
@@ -574,27 +543,24 @@ def decon(im:jnp.array, psf:jnp.array, psigma:int=3, n_iter:int=10, alphamax:flo
 def iter_rl(im: jnp.array, fftPSF:jnp.array, f:jnp.array, bg:float, W:Optional[jnp.array]=None) -> jnp.array:
     M, N, P = im.shape
     wM, wN, wP = f.shape
+    wshape = f.shape
     F = fft(f)
-    y = jnp.fft.irfftn(fftPSF * F)#fft_convolve_cc_f2(fftPSF, F)
+    y = jnp.fft.irfftn(fftPSF * F, s=wshape)
     error = get_error(y, im)
     # crop down to size of image
     y_subset = y[:M,:N,:P]
     y_subset = jnp.where(y_subset > 0, im/y_subset, bg)
-    #idx = y_subset > 0
-    #y_subset = y_subset.at[idx].set(im[idx]/y_subset[idx])
-    #y_subset = y_subset.at[~idx].set(bg)
     # set everything outside of image to 1e-6
-    #y[M:, N:, P:] = 1e-6
     y = jnp.ones_like(y)*1e-6
     # set everything within image
     y = y.at[:M, :N, :P].set(y_subset)
     # convolve with PSF for next iteration
     F_sn = fft(y)
-    x = jnp.fft.irfftn(jnp.conj(fftPSF) * F_sn)#fft_convolve_cc_conj_f2(fftPSF, F_sn)
-    #if W is None:
-    #    x *= f
-    #else:
-    x *= f * W
+    x = jnp.fft.irfftn(jnp.conj(fftPSF) * F_sn, s=wshape)
+    if W is not None:
+        x *= f * W
+    else:
+        x *= f
     return x, error
 
 @jax.jit
@@ -619,22 +585,19 @@ def iter_shb_jit(im:jnp.array, cK:jnp.array, x: jnp.array, xp: jnp.array, W:jnp.
     # estimate gradient based on scaled difference from previous round
     p = x + (x - xp)*alpha
     # set pixels less than background to background
+    wshape = x.shape
     pK = jnp.where(p < bg, bg, p) #p.at[jnp.where(p < bg)].set(bg)
     pK_F = fft(pK)
     # convolve with PSF
-    y = fft_convolve_cc_f2(cK, pK_F)
+    y = fft_convolve_cc_f2(cK, pK_F, s=wshape)
     error = get_error(y, im)
     mindiv = 1e-6 # smallest allowed divisor
     y_subset = y[:M, :N, :P]
     y_subset  = jnp.where(jnp.abs(y_subset) < mindiv, jnp.copysign(mindiv, y_subset), y_subset)
-    #y_subset = y_subset.at[jnp.where(jnp.abs(y_subset) < mindiv)].set(jnp.sign(y_subset[jnp.abs(y_subset) < mindiv])*mindiv)
     y_subset = im/y_subset
     y = jnp.zeros_like(y)
     y = y.at[:M, :N, :P].set(y_subset)
-    #y[M:, N:, P:] = 0
-    #else:
-    #    x *= pK
-    x = update_x_shb(y, cK, pK, W)
+    x = update_x_shb(y, cK, pK, W, s=wshape)
     return x, error
 
 @jax.jit
@@ -654,35 +617,24 @@ def iter_shb(im:jnp.array, cK:jnp.array, pK: jnp.array, W:jnp.array ) -> Tuple[j
         jnp.array: _description_
     """
     M, N, P = im.shape
-    # current guess, based on update from previous
-    # p^k in Eq. 7 o SHB paper
-    # estimate gradient based on scaled difference from previous round
-
-    # set pixels less than background to background
-    #pK = jnp.where(p < bg, bg, p) #p.at[jnp.where(p < bg)].set(bg)
+    wshape = pK.shape
     pK_F = fft(pK)
     # convolve with PSF
-    y = fft_convolve_cc_f2(cK, pK_F)
+    y = fft_convolve_cc_f2(cK, pK_F, s=wshape)
     error = get_error(y, im)
     mindiv = 1e-6 # smallest allowed divisor
     y_subset = y[:M, :N, :P]
     y_subset  = jnp.where(jnp.abs(y_subset) < mindiv, jnp.copysign(mindiv, y_subset), y_subset)
-    #y_subset = y_subset.at[jnp.where(jnp.abs(y_subset) < mindiv)].set(jnp.sign(y_subset[jnp.abs(y_subset) < mindiv])*mindiv)
     y_subset = im/y_subset
     y = jnp.zeros_like(y)
     y = y.at[:M, :N, :P].set(y_subset)
-    #y[M:, N:, P:] = 0
-    #else:
-    #    x *= pK
-    x = update_x_shb(y, cK, pK, W)
+    x = update_x_shb(y, cK, pK, W, s=wshape)
     return x, error
 
-@jax.jit
-def update_x_shb(y:jnp.array, cK:jnp.array, pK:jnp.array, W:jnp.array) -> jnp.array:
+def update_x_shb(y:jnp.array, cK:jnp.array, pK:jnp.array, W:jnp.array, s=None) -> jnp.array:
     Y = fft(y)
     # convolve with PSF
-    x = fft_convolve_cc_conj_f2(cK, Y)
-    #if W is not None:
+    x = fft_convolve_cc_conj_f2(cK, Y, s=s)
     x *= pK * W
     return x
 
@@ -804,9 +756,9 @@ def decon_fast(im: jnp.ndarray, psf: jnp.ndarray, psigma: int = 3,
     wP = P + pP - 1
 
     if border_quality == 1:
-        wM = int(M + (pM + 1) / 2)
-        wN = int(N + (pN + 1) / 2)
-        wP = int(P + (pP + 1) / 2)
+        wM = M + (pM + 1) // 2
+        wN = N + (pN + 1) // 2
+        wP = P + (pP + 1) // 2
     elif border_quality == 0:
         wM = max(M, pM)
         wN = max(N, pN)
@@ -828,9 +780,9 @@ def decon_fast(im: jnp.ndarray, psf: jnp.ndarray, psigma: int = 3,
     sigma = 0.01
     if border_quality > 0:
         F_one = initial_guess(M, N, P, wM, wN, wP)
-        W = jnp.fft.irfftn(fft_mul_conj(cK, F_one))
+        W = jnp.fft.irfftn(fft_mul_conj(cK, F_one), s=wshape)
         idx = W > sigma
-        W = W.at[idx].divide(W[idx])
+        W = W.at[idx].set(1.0 / W[idx])
         W = W.at[~idx].set(0)
     else:
         W = jnp.ones(wshape)
@@ -887,9 +839,9 @@ def batch_deconvolve(images: jnp.ndarray, psf: jnp.ndarray,
     wP = P + pP - 1
 
     if border_quality == 1:
-        wM = int(M + (pM + 1) / 2)
-        wN = int(N + (pN + 1) / 2)
-        wP = int(P + (pP + 1) / 2)
+        wM = M + (pM + 1) // 2
+        wN = N + (pN + 1) // 2
+        wP = P + (pP + 1) // 2
     elif border_quality == 0:
         wM = max(M, pM)
         wN = max(N, pN)
@@ -910,9 +862,9 @@ def batch_deconvolve(images: jnp.ndarray, psf: jnp.ndarray,
     sigma = 0.01
     if border_quality > 0:
         F_one = initial_guess(M, N, P, wM, wN, wP)
-        W = jnp.fft.irfftn(fft_mul_conj(cK, F_one))
+        W = jnp.fft.irfftn(fft_mul_conj(cK, F_one), s=wshape)
         idx = W > sigma
-        W = W.at[idx].divide(W[idx])
+        W = W.at[idx].set(1.0 / W[idx])
         W = W.at[~idx].set(0)
     else:
         W = jnp.ones(wshape)
